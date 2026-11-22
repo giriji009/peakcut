@@ -40,6 +40,7 @@ OPEN = ("/api/auth/", "/pub/", "/api/public", "/auth/google/", "/auth/verify", "
 PAGES = {"/": "landing.html", "/login": "auth.html", "/signup": "auth.html", "/reset": "reset.html",
          "/privacy": "legal.html", "/terms": "legal.html", "/acceptable-use": "legal.html"}
 VIDEO_TYPES = {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".ts", ".flv"}
+CLIP_ID = re.compile(r"clip\d{2,3}")  # uploaded videos: clip01; live recordings: clip001
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
        "frame-src https://player.twitch.tv https://www.youtube-nocookie.com https://player.kick.com; "
@@ -927,6 +928,108 @@ def upload_cancel(upid: str):
     return {"ok": True}
 
 
+@app.post("/api/jobs/{jid}/detect-facecam")
+def detect_facecam(jid: str, body: dict = Body(default=None)):
+    """Find the webcam box in the job's source video (for the framing editor)."""
+    from . import brain, facecam as fc_mod
+    job = _job_or_404(jid)
+    body = body or {}
+    cid = str(body.get("clip") or "").strip() or None
+    try:
+        path = jobs.ensure_framing_source(job, cid) if cid else jobs.framing_source(job, None)
+        if not path:
+            raise ValueError("Source video is not ready yet.")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    box = fc_mod.detect(path, ask=brain.look_for_facecam)
+    out = {"facecam": None, "corner": None}
+    if box:
+        fc = [box["x"], box["y"], box["w"], box["h"]]
+        jobs.apply_framing(job, {"facecam": fc})
+        out = {"facecam": job["facecam"], "corner": box.get("corner")}
+    return out
+
+
+@app.post("/api/jobs/{jid}/framing")
+def set_job_framing(jid: str, body: dict = Body(default=None)):
+    """Save facecam/gameplay for every clip in this video; optional re-make and creator defaults."""
+    job = _job_or_404(jid)
+    body = body or {}
+    changes = {k: body[k] for k in ("facecam", "gameplay") if k in body}
+    try:
+        if changes:
+            jobs.apply_framing(job, changes)
+        layout = str(body.get("layout") or "").strip()
+        if layout:
+            jobs.apply_framing_layout(job, layout)
+        if body.get("save_default") and job.get("creator"):
+            from . import creators
+            patch = {}
+            if job.get("facecam"):
+                patch["default_facecam"] = job["facecam"]
+            if job.get("gameplay"):
+                patch["default_gameplay"] = job["gameplay"]
+            if layout:
+                patch["layout"] = layout
+            if patch:
+                creators.update(job["creator"], patch)
+        if body.get("remake"):
+            jobs.remake_all_clips(job, layout or "stack")
+        if job.get("framing_ok") and body.get("queue_autopost", True):
+            from . import posting
+            posting.enqueue_ready_clips(job)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    return jobs.public(job)
+
+
+@app.get("/media/{jid}/source.mp4")
+def job_source_mp4(jid: str):
+    job = _job_or_404(jid)
+    p = jobs.framing_source(job, None)
+    if not p:
+        raise HTTPException(404)
+    return FileResponse(p, media_type="video/mp4", headers={"Cache-Control": "private, max-age=120"})
+
+
+@app.get("/media/{jid}/framing/{cid}")
+def clip_framing_source(jid: str, cid: str):
+    """Horizontal source for the framing editor (always MP4 in the browser)."""
+    if not CLIP_ID.fullmatch(cid):
+        raise HTTPException(404)
+    job = _job_or_404(jid)
+    try:
+        p = jobs.framing_preview(job, cid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(422, safe.friendly(e, 200))
+    return FileResponse(p, media_type="video/mp4", headers={"Cache-Control": "private, max-age=120"})
+
+
+@app.get("/media/{jid}/framing/{cid}/frame.jpg")
+def clip_framing_still(jid: str, cid: str):
+    """Still image of the wide source (fast; used when the MP4 is slow or missing)."""
+    if not CLIP_ID.fullmatch(cid):
+        raise HTTPException(404)
+    job = _job_or_404(jid)
+    out = Path(job["dir"]) / "clips" / f"{cid}.frame.jpg"
+    src = jobs.framing_source(job, cid)
+    if not out.is_file() or (src and out.is_file() and src.stat().st_mtime > out.stat().st_mtime):
+        try:
+            jobs.ensure_framing_source(job, cid)
+            clip = next(c for c in job["clips"] if c["id"] == cid)
+            jobs.write_framing_still(job, clip)
+            jobs.save(job)
+        except (ValueError, StopIteration):
+            raise HTTPException(404, "Wide source not ready.")
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(422, safe.friendly(e, 200))
+    if not out.is_file():
+        raise HTTPException(404)
+    return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
 @app.post("/api/jobs/{jid}/clips/{cid}/render")
 def rerender(jid: str, cid: str, body: dict = Body(...)):
     job = _job_or_404(jid)
@@ -939,6 +1042,29 @@ def rerender(jid: str, cid: str, body: dict = Body(...)):
     try:
         jobs.request_render(jid, cid, body)
     except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    return jobs.public(job)
+
+
+@app.post("/api/jobs/{jid}/resume-clips")
+def resume_clips(jid: str):
+    """Start any clips still queued after the video finished (fast queue)."""
+    _job_or_404(jid)
+    try:
+        n = jobs.resume_queued_clips(jid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    if not n:
+        raise HTTPException(400, "No clips are waiting to be made.")
+    return {"queued": n}
+
+
+@app.post("/api/jobs/{jid}/cancel")
+def cancel_job(jid: str):
+    job = _job_or_404(jid)
+    try:
+        jobs.cancel_job(jid)
+    except ValueError as e:
         raise HTTPException(400, str(e))
     return jobs.public(job)
 
@@ -1315,7 +1441,13 @@ def get_settings():
 @app.put("/api/settings")
 def put_settings(body: dict = Body(...)):
     try:
+        was_fast = bool(accounts.settings().get("post_fast"))
         accounts.save_settings(body)
+        if body.get("post_fast") and not was_fast:
+            try:
+                posting.accelerate_queue()
+            except ValueError as e:
+                raise HTTPException(400, str(e))
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
     return accounts.public_settings()
@@ -1330,6 +1462,23 @@ def list_accounts():
 def remove_account(aid: str):
     accounts.remove(aid)
     return {"ok": True}
+
+
+@app.post("/api/accounts/instagram/token")
+def instagram_token_connect(body: dict = Body(default=None)):
+    """Connect Instagram with a token from Meta's dashboard (no redirect URL on this server)."""
+    body = body or {}
+    token = str(body.get("token") or "").strip()
+    if not token:
+        raise HTTPException(400, "Paste the Instagram access token from Meta.")
+    _throttle("connect:" + ctx.uid(), 30, 600)
+    try:
+        acc = accounts.instagram_add(token)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, safe.friendly(e, 240))
+    return {"ok": True, "name": acc["name"]}
 
 
 # ---------------------------------------------------------------- connecting YouTube, Instagram and TikTok
@@ -1459,6 +1608,36 @@ def add_posts(body: dict = Body(...)):
     if not made:
         raise HTTPException(400, "Nothing was queued. Pick at least one account this clip has not already gone to.")
     return {"queued": len(made)}
+
+
+@app.post("/api/posts/accelerate")
+def accelerate_posts():
+    """Pack the queue: tight spacing, one-by-one uploads, failed posts retried."""
+    try:
+        return posting.accelerate_queue()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/posts/dedupe")
+def dedupe_posts():
+    """Cancel stale queue rows after a successful post; delete true duplicates on YouTube/Instagram."""
+    return posting.dedupe_posted()
+
+
+@app.post("/api/posts/bulk")
+def bulk_posts(body: dict = Body(...)):
+    """Queue many clips to selected accounts. Spreads posts using each creator's gap (safe for Instagram)."""
+    _throttle("bulkpost:" + ctx.uid(), 15, 600, "Give it a minute between large bulk posts.")
+    pairs = _pairs(body.get("clips"))
+    if not pairs:
+        raise HTTPException(400, "Pick at least one finished clip.")
+    if len(pairs) > 150:
+        raise HTTPException(400, "At most 150 clips at once.")
+    try:
+        return posting.bulk_enqueue(pairs, body.get("accounts") or [], now=bool(body.get("now")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/posts/{pid}/{action}")

@@ -191,7 +191,8 @@ class Session:
             return None
         if not box or box.get("conf") != "high":
             return None
-        self.job["facecam"] = [box["x"], box["y"], box["w"], box["h"]]
+        fc = [box["x"], box["y"], box["w"], box["h"]]
+        jobs.apply_framing(self.job, {"facecam": fc})
         return self.job["facecam"]
 
     # ---------------------------------------------------------------- the game this stream is
@@ -609,18 +610,21 @@ class Session:
             lst.unlink(missing_ok=True)
         # Only the gameplay layout uses a webcam, and only once the clip's own file is written: the
         # webcam is looked for in it, once per stream.
-        if clip.get("layout") == "gameplay":
+        if clip.get("layout") in ("gameplay", "stack"):
             if not self.facecam_checked:
                 self.facecam_box = self._find_facecam(src)
                 self.facecam_checked = True
             if self.facecam_box:
                 clip["facecam"] = self.facecam_box
+            if self.job.get("gameplay"):
+                clip["gameplay"] = self.job["gameplay"]
         dur = segs[-1][2] - segs[0][1]
         offset = self._align(src, segs[0][1] + self.clock_fix, dur)
         self.clock_fix = offset - segs[0][1]  # the two clocks drift ~4 s an hour; start the next clip from here
         clip.update(src=str(src), src_offset=round(offset, 2), src_end=round(offset + dur, 2))
         clip["start"] = max(clip["start"], clip["src_offset"])
         clip["end"] = min(clip["end"], clip["src_end"])
+        jobs.write_framing_still(self.job, clip)
         jobs.render_one(self.job, clip, list(self.words))
 
     def _align(self, src, guess, dur):

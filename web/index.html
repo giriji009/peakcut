@@ -531,6 +531,14 @@ img.av{object-fit:cover}
 .selck:hover{background:var(--brand-soft)}
 .selck input{width:16px;height:16px;accent-color:var(--brand);cursor:pointer;margin:0}
 .clip.picked{border-color:var(--brand)}
+.clip.posting-live{outline:2px solid var(--brand);outline-offset:2px;box-shadow:0 0 0 4px var(--brand-soft)}
+.clip.posting-next{outline:1px dashed var(--brand-ink)}
+.post-live{margin:0 0 16px;padding:14px 16px;border-radius:var(--r);background:linear-gradient(135deg,var(--brand-soft),transparent)}
+.post-live .bar{height:8px;margin:10px 0 6px}
+.post-live .row{align-items:center;gap:12px}
+.post-live b{font-size:1.05rem}
+.queue-table tr.row-live td{background:var(--brand-soft)}
+.queue-table tr.row-next td{border-left:3px solid var(--brand)}
 #selbar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;display:none;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;
   max-width:calc(100vw - 24px);padding:10px 12px 10px 18px;border-radius:14px;background:#1F140D;color:#FFF4EA;font-size:14px;border:1px solid rgba(255,178,122,.25)}
 #selbar.on{display:flex}
@@ -594,11 +602,40 @@ a.lnk{color:var(--brand-ink);text-decoration:none;font-weight:600}
 
 /* ---------- dialogs + toasts */
 dialog{border:1px solid var(--line);background:#fff;color:var(--text);border-radius:var(--r-lg);padding:0;max-width:calc(100vw - 32px)}
+#clipdlg{width:min(98vw,1540px);max-width:98vw;max-height:96vh}
+#clipdlg .editor.wide{width:100%;max-width:none;grid-template-columns:minmax(200px,260px) minmax(440px,1.45fr) minmax(260px,300px);max-height:min(94vh,920px)}
+#clipdlg .frame-wrap img#frSrc{max-height:min(62vh,680px);min-height:300px;width:100%}
+#clipdlg .fr-vert canvas{width:108px;height:192px}
+#clipdlg .frame-panel{min-width:400px}
+#framedlg{width:min(98vw,900px);max-width:98vw;max-height:96vh}
+#framedlg .frame-wrap img#frSrc{max-height:min(62vh,680px);min-height:300px;width:100%}
 dialog::backdrop{background:rgba(14,12,11,.42);animation:fadein .16s ease}
 .dlg{padding:24px;width:450px;max-width:100%;display:flex;flex-direction:column;gap:14px}
 .dlg h2{font-size:18px;font-weight:600;color:var(--brand-ink)}
 .dlg-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
 .editor{display:grid;grid-template-columns:minmax(240px,340px) minmax(300px,450px);max-height:calc(100vh - 48px)}
+.editor.wide{grid-template-columns:minmax(220px,300px) minmax(280px,1fr) minmax(260px,320px);max-width:min(1120px,100vw - 32px)}
+.frame-wrap{position:relative;background:#17110E;border-radius:10px;overflow:hidden;line-height:0}
+.frame-wrap video,.frame-wrap img#frSrc{width:100%;display:block;max-height:34vh;object-fit:contain;background:#0b0912}
+.frame-layer{position:absolute;inset:0;pointer-events:none}
+.frame-wrap.drawing{user-select:none;cursor:crosshair}
+.frame-wrap.drawing .frame-layer{pointer-events:auto}
+.frame-box{position:absolute;border:2px solid;box-sizing:border-box;touch-action:none;cursor:grab}
+.frame-box:active{cursor:grabbing}
+.frame-box.fc{border-color:#FF8B83;background:rgba(255,139,131,.14)}
+.frame-box.gm{border-color:#58e8f7;background:rgba(88,232,247,.12)}
+.frame-rub{position:absolute;border:2px dashed var(--brand);background:rgba(255,139,51,.15);pointer-events:none}
+.frame-tools{display:flex;flex-wrap:wrap;gap:6px}
+.frame-tools .btn[data-act=dragfc][aria-pressed=true],.frame-tools .btn[data-act=draggm][aria-pressed=true]{background:var(--brand-soft);color:var(--brand-ink)}
+.frame-layouts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:8px 0}
+.frame-layouts button{display:flex;flex-direction:column;gap:4px;padding:6px;border:0;border-radius:8px;background:#fff;font-size:11px;font-weight:600;color:var(--dim);cursor:pointer}
+.frame-layouts button[aria-pressed=true]{background:var(--brand-soft);color:var(--brand-ink)}
+.fr-vert{margin-top:10px;padding:8px;background:#0b0912;border-radius:10px;text-align:center}
+.fr-vert small{display:block;color:var(--faint);font-size:11px;margin-bottom:6px}
+.fr-vert canvas{width:90px;height:160px;border-radius:6px;background:#17110E}
+.lay-prev.stack .ph i{top:5px;height:11px;left:3px;right:3px;transform:none;background:#FF8B83}
+.lay-prev.stack .ph::after{content:"";position:absolute;left:3px;right:3px;bottom:5px;height:26px;border-radius:2px;background:linear-gradient(135deg,#FF8B33,#FFB27A)}
+.lay-prev.gameplay .ph i{width:10px;height:10px;left:auto;right:4px;top:4px;transform:none}
 .editor .stage{background:#17110E;display:grid;place-items:center;position:relative;min-height:320px}
 .editor video,.editor .stage img{width:100%;max-height:calc(100vh - 48px);aspect-ratio:9/16;object-fit:contain;display:block}
 .editor .panel{padding:22px;overflow:auto;display:flex;flex-direction:column;gap:14px}
@@ -832,6 +869,7 @@ dialog[open]{animation:fadein .16s ease}
   </main>
 </div>
 <dialog id="clipdlg"></dialog>
+<dialog id="framedlg"></dialog>
 <dialog id="formdlg"></dialog>
 <input type="file" id="file" accept="video/*" multiple hidden>
 <div id="toasts" role="status" aria-live="polite"></div>
@@ -1389,7 +1427,7 @@ function drawAdd(variant) {
     </div></div></form>`;
   drawAtt();
 }
-const LAYOUT_SHORT = {blur:"Blurred fill", zoom:"Zoomed in", crop:"Fill screen", gameplay:"Gameplay + facecam"};
+const LAYOUT_SHORT = {blur:"Blurred fill", zoom:"Zoomed in", crop:"Fill screen", gameplay:"Gameplay + facecam", stack:"Face + gameplay"};
 const CAP_LOOK = {bounce:{font:"'Archivo Black'", hl:"#FFFF00", up:true}, hype:{font:"Anton", hl:"#FF3C3C", up:true}, clean:{font:"Poppins", hl:"#6BD7FF", up:false, w:800}};
 function capPrev(k) {
   const s = CAP_LOOK[k] || {font:"inherit", hl:"#FF8B33", up:true};
@@ -1672,8 +1710,10 @@ async function makeClips() {
 function scoreCls(s) { return s >= 80 ? "s-hi" : s >= 60 ? "s-mid" : ""; }
 function postPills(c) {
   return Object.values(c.posts || {}).filter(p => p.status !== "cancelled").map(p => {
-    const cls = p.status === "posted" ? "ok" : p.status === "failed" ? "bad" : "warn";
-    const txt = `${esc(p.account_name)} · ${p.status === "scheduled" ? clock(p.due_at) : p.status}`;
+    const cls = p.status === "posted" ? "ok" : p.status === "failed" ? "bad" : p.status === "posting" ? "live" : "warn";
+    const txt = p.status === "scheduled" ? `${esc(p.account_name)} · ${clock(p.due_at)}`
+      : p.status === "posting" ? `${esc(p.account_name)} · Uploading ${p.post_progress ?? "…"}%`
+      : `${esc(p.account_name)} · ${p.status === "posted" ? "posted" : p.status}`;
     return p.url ? `<a class="pill ${cls}" href="${esc(p.url)}" target="_blank" rel="noopener">${txt}</a>` : `<span class="pill ${cls}" title="${esc(p.error || "")}">${txt}</span>`;
   }).join("");
 }
@@ -1683,7 +1723,12 @@ function clipHtml(j, c) {
     : c.status === "error" ? `<span class="making" style="animation:none;color:var(--bad);background:var(--bad-soft)">Could not make this clip. Open it to try again.</span>`
     : `<span class="making">${c.status === "rendering" ? "Making this clip…" : "Waiting its turn…"}</span>`;
   const key = `c:${j.id}:${c.id}`, busyClip = c.status === "queued" || c.status === "rendering";
-  return `<article class="clip ${sel().has(key) ? "picked" : ""}">
+  const posts = Object.values(c.posts || {});
+  const postingNow = posts.some(p => p.status === "posting");
+  const postingNext = !postingNow && posts.some(p => p.status === "scheduled") && S.overview?.queue_progress?.next
+    && S.overview.queue_progress.next.job === j.id && S.overview.queue_progress.next.clip === c.id;
+  const postCls = postingNow ? " posting-live" : postingNext ? " posting-next" : "";
+  return `<article class="clip ${sel().has(key) ? "picked" : ""}${postCls}">
     <button class="shot" data-act="openclip" ${a} aria-label="Open clip: ${esc(c.title || c.hook)}">${body}
       <span class="badge l ${scoreCls(c.score)}" title="AI score">${c.score || "Hand"}</span><span class="badge r">${fmt(c.end - c.start)}</span></button>
     <div class="clip-body">
@@ -1737,10 +1782,12 @@ function jobHtml(j) {
   const pic = j.thumb ? `<img src="/media/${esc(j.id)}/thumb.jpg" alt="" loading="lazy">` : ic(j.source?.type === "file" ? "film" : "link");
   return `<div class="job-head"><div class="jt"><span class="jthumb">${pic}${j.duration ? `<span class="du">${fmt(j.duration)}</span>` : ""}</span><div style="min-width:0"><h3>${esc(j.title || j.source.name)}</h3><p class="sub">${meta}</p></div></div>
       <div class="row" style="flex-wrap:nowrap;gap:4px">${busy ? "" : `
+        ${j.status === "done" && j.width && j.clips.length ? `<button class="btn sm primary" data-act="jobframe" data-j="${j.id}" title="Face & gameplay for every clip in this video">${ic("sliders")}All clips</button>` : ""}
+        ${j.clips.some(c => c.status === "done") ? `<button class="btn sm" data-act="postalljob" data-j="${j.id}" title="Post every finished clip from this video">${ic("send")}Post all</button>` : ""}
         ${j.clips.some(c => c.status === "done") ? `<button class="btn sm icon ghost" data-act="dlall" data-j="${j.id}" title="Download all clips of this video" aria-label="Download all clips of this video">${ic("down")}</button>` : ""}
         <button class="btn sm icon ghost" data-act="deljob" data-j="${j.id}" title="Delete" aria-label="Delete this video and its clips">${ic("trash")}</button>
         <label class="selck" title="Select this video and its clips"><input type="checkbox" data-sel="j:${j.id}" ${sel().has("j:" + j.id) ? "checked" : ""} aria-label="Select this video"></label>`}</div></div>
-    ${busy ? `<div class="bar"><i style="width:${Math.round(j.progress * 100)}%"></i></div><p class="sub">${esc(j.stage)} · ${Math.round(j.progress * 100)}%</p>` : ""}
+    ${busy ? `<div class="row" style="margin:8px 0 4px;gap:8px"><button type="button" class="btn sm danger" data-act="canceljob" data-j="${j.id}">${ic("stop")}Stop</button><p class="sub" style="margin:0;flex:1">${esc(j.stage)} · ${Math.round(j.progress * 100)}%</p></div><div class="bar"><i style="width:${Math.round(j.progress * 100)}%"></i></div>` : ""}
     ${j.status === "done" && !j.clips.length ? `<p class="sub">${esc(j.stage)}</p>` : ""}
     ${j.error ? `<div class="err">${esc(j.error)}<button class="rep" data-act="report" data-ctx="${esc("Video failed: " + (j.title || j.source.name || "") + " | " + j.error)}">Report this</button></div>` : ""}${j.ai?.note ? `<p class="sub">${esc(j.ai.note)}</p>` : ""}
     ${j.clips.length ? `<div class="grid">${j.clips.map(c => clipHtml(j, c)).join("")}</div>` : ""}`;
@@ -1771,6 +1818,7 @@ function drawSelBar() {
   put(bar, `<b>${n} selected</b>
     <button class="btn sm" data-act="selall">Select all</button>
     <button class="btn sm primary" data-act="seldl" ${dl ? "" : "disabled"}>${ic("down")}Download${dl ? ` ${dl} clip${dl === 1 ? "" : "s"}` : ""}</button>
+    <button class="btn sm primary" data-act="selpost" ${dl ? "" : "disabled"}>${ic("send")}Post${dl ? ` ${dl}` : ""}</button>
     <button class="btn sm danger" data-act="seldel">${ic("trash")}Delete</button>
     <button class="btn sm" data-act="selclear">Cancel</button>`);
 }
@@ -1779,6 +1827,40 @@ function zipDownload(ids) {
   if (ids.length > 150) return toast("That is a lot at once. Download up to 150 clips at a time.", "bad");
   toast(ids.length === 1 ? "Preparing your clip…" : `Preparing ${ids.length} clips as one download…`, "ok");
   const a = document.createElement("a"); a.href = "/api/clips.zip?ids=" + encodeURIComponent(ids.join(",")); a.download = ""; document.body.append(a); a.click(); a.remove();
+}
+function bulkClipKeys(ids) {
+  return ids.map(k => { const p = k.split("."); return p.length === 2 ? [p[0], p[1]] : null; }).filter(Boolean);
+}
+function openBulkPostDialog(clipIds, title) {
+  const A = S.accounts;
+  if (!A.length) return toast("Connect YouTube or Instagram in Settings first.", "bad");
+  const n = clipIds.length;
+  if (!n) return toast("No finished clips to post.", "bad");
+  const dlg = $("#formdlg");
+  const byPlat = {YouTube: [], Instagram: [], TikTok: []};
+  for (const a of A) (byPlat[a.label] || byPlat.YouTube).push(a);
+  const accs = ["YouTube", "Instagram", "TikTok"].filter(p => byPlat[p]?.length).map(p =>
+    `<div style="margin:8px 0 4px"><b>${p}</b></div>${byPlat[p].map(a =>
+      `<label class="ck" style="display:block;margin:4px 0"><input type="checkbox" name="bulkacc" value="${esc(a.id)}" checked> ${esc(a.name)} <span class="sub">(${esc(a.detail || a.label)})</span></label>`).join("")}`
+  ).join("");
+  dlg.innerHTML = `<form method="dialog" class="dlg"><h2>${esc(title || "Post clips")}</h2>
+    <p class="help"><b>${n}</b> clip${n === 1 ? "" : "s"} → pick accounts below. Posts are <b>spread out</b> automatically (your creator gap on Instagram) so rate limits are less likely.</p>
+    <div style="max-height:40vh;overflow:auto;margin:12px 0">${accs}</div>
+    <label class="sw"><input type="checkbox" id="bulkNow"> Post the first one immediately (rest stay queued with spacing)</label>
+    <motion class="dlg-foot"><button type="button" class="btn" value="no">Cancel</button>
+      <button type="submit" class="btn primary" value="yes">${ic("send")} Queue all safely</button></motion></form>`;
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== "yes") return;
+    const accounts = $$("input[name=bulkacc]:checked").map(i => i.value);
+    if (!accounts.length) return toast("Tick at least one account.", "bad");
+    if (!await ask("Post these clips?", `${n} clip${n === 1 ? "" : "s"} will go to ${accounts.length} account(s), spaced apart. Clips already on an account are skipped.`, "Queue posts")) return;
+    try {
+      const r = await send("/api/posts/bulk", {clips: clipIds, accounts, now: !!$("#bulkNow")?.checked});
+      toast(`Queued ${r.queued} post${r.queued === 1 ? "" : "s"} for ${r.clips} clip${r.clips === 1 ? "" : "s"}` + (r.skipped ? ` (${r.skipped} skipped)` : ""), "ok");
+      return tick();
+    } catch (e) { toast(e.message, "bad"); }
+  };
+  dlg.returnValue = "no"; dlg.showModal();
 }
 function askTyped(title, text, mustType, okLabel) {
   return new Promise(res => {
@@ -1869,6 +1951,8 @@ function drawCreatorForm() {
       ${A.length ? `<div class="row" style="margin-bottom:16px">${A.map(a => `<label class="ck"><input type="checkbox" data-acc value="${esc(a.id)}" ${c.accounts.includes(a.id) ? "checked" : ""}>${esc(a.label)} · ${esc(a.name)}</label>`).join("")}</div>` : `<button class="btn" data-act="go" data-v="settings" style="margin-bottom:16px">${ic("cog")}Open Settings</button>`}
       <div class="fields"><label class="sw span"><input type="checkbox" data-k="autopost" ${c.autopost ? "checked" : ""}><span>Post new clips automatically<small>Clips that score high enough go out without you approving them.</small></span></label>
         <label class="f">Only auto-post clips scoring at least<input data-k="post_min_score" type="number" min="0" max="100" value="${c.post_min_score}"></label>
+        <label class="sw span"><input type="checkbox" data-k="post_after_framing" ${c.post_after_framing !== false ? "checked" : ""}><span>Wait for face & gameplay on each video before auto-post<small>Set once per video (All clips button). Saves time — no editing every clip.</small></span></label>
+        <p class="help span">Tip: Creator <b>Layout</b> → Face + gameplay, then use <b>All clips</b> on the video once boxes are drawn. Tick <b>Save as my default</b> in that dialog to reuse on the next video.</p>
         <label class="f">Minutes between posts on one account<input data-k="post_gap_min" type="number" value="${c.post_gap_min}"></label>
         <label class="f">Most posts per account per day<input data-k="daily_cap" type="number" value="${c.daily_cap}"></label>
         <label class="f">Who can see posts (YouTube, TikTok)<select data-k="privacy">${opts({public:"Public", unlisted:"Unlisted", private:"Private"}, c.privacy)}</select></label>
@@ -1923,7 +2007,20 @@ function drawOverview() {
   const sum = k => o.creators.reduce((a, r) => a + r[k], 0);
   const d14 = k => (o.daily || []).reduce((a, d) => a + d[k], 0);
   const state = r => r.state === "recording" ? `<span class="pill live"><span class="dot"></span>Recording</span>` : r.state === "waiting" ? `<span class="pill warn">Waiting for live</span>` : `<span class="pill">Idle</span>`;
-  const pst = p => p.status === "posted" ? `<span class="pill ok">Posted</span>` : p.status === "failed" ? `<span class="pill bad">Failed</span>` : p.status === "posting" ? `<span class="pill warn">Posting now</span>` : `<span class="pill warn">${clock(p.due_at)}</span>`;
+  const pst = p => p.status === "posted" ? `<span class="pill ok">Posted</span>` : p.status === "failed" ? `<span class="pill bad">Failed</span>`
+    : p.status === "posting" ? `<span class="pill live"><span class="dot"></span>${p.post_progress ?? 0}%</span>`
+    : p.is_next ? `<span class="pill warn">Up next · ${clock(p.due_at)}</span>` : `<span class="pill warn">${clock(p.due_at)}</span>`;
+  const q = o.queue_progress || {};
+  const live = q.active ? `<div class="post-live">
+      <div class="row"><div style="flex:1"><b>Uploading now</b><p class="sub" style="margin:4px 0 0">${esc(q.active.title)} → ${esc(q.active.account_name)}</p></div>
+        <span class="pill live"><span class="dot"></span>${q.active.post_progress ?? 0}%</span></div>
+      <div class="bar"><i style="width:${Math.max(4, q.active.post_progress || 6)}%"></i></div>
+      <p class="help" style="margin:0">Overall queue: <b>${q.posted ?? 0}</b> done · <b>${q.waiting ?? 0}</b> waiting${q.failed ? ` · <span style="color:var(--bad)">${q.failed} failed</span>` : ""}</p></div>` : "";
+  const nxt = q.next && !q.active ? `<div class="post-live" style="background:var(--bg2)">
+      <b>Up next</b><p class="sub" style="margin:4px 0 0">${esc(q.next.title)} → ${esc(q.next.account_name)} · ${clock(q.next.due_at)}</p>
+      <div class="bar"><i style="width:${Math.max(4, q.percent || 0)}%"></i></div>
+      <p class="help" style="margin:0">Overall <b>${q.percent ?? 0}%</b> complete (${q.posted ?? 0} / ${q.total ?? 0} posts)</p></div>` : (!q.active && q.total ? `<div class="post-live" style="background:var(--bg2)"><p class="help" style="margin:0">Queue <b>${q.percent ?? 0}%</b> done · ${q.posted ?? 0} posted · ${q.waiting ?? 0} waiting</p>
+      <div class="bar"><i style="width:${Math.max(4, q.percent || 0)}%"></i></div></div>` : "");
   const steps = nextSteps(o);
   put(box, `<div class="tiles">
       <div class="tile"><i>${ic("radio")}</i><b>${o.recording}</b><span>Recording now</span></div>
@@ -1944,10 +2041,13 @@ function drawOverview() {
       ${o.creators.length ? `<div class="scroll"><table><tr><th>Creator</th><th>Status</th><th>Auto-post</th><th class="num">Clips today</th><th class="num">Posted today</th><th class="num">Waiting</th><th class="num">Failed</th><th class="num">Views</th><th class="num">Est. $</th></tr>
       ${o.creators.map(r => `<tr><td><a class="lnk" href="#" data-act="go" data-v="c:${esc(r.id)}">${esc(r.name)}</a></td><td>${state(r)}</td><td>${r.autopost ? `<span class="pill ok">On</span>` : `<span class="pill">Off</span>`}</td><td class="num">${r.clips_today} <span class="sub">/ ${r.clips_total}</span></td><td class="num">${r.posted_today} <span class="sub">/ ${r.posted_total}</span></td><td class="num">${r.queued}</td><td class="num">${r.failed}</td><td class="num">${r.views.toLocaleString()}</td><td class="num">${r.earnings.toFixed(2)}</td></tr>`).join("")}</table></div>`
       : `<div class="empty"><img src="/brand/favicon.svg" alt=""><b>No creators yet</b>Add one to give each streamer their own workspace.</div>`}</div>
-    <div class="card"><div class="card-head"><div><h2>Post queue</h2><p class="sub">${o.paused ? "Paused. Recording and clipping carry on; nothing is posted." : "Queued clips go out at their scheduled time."}</p></div>
-        <button class="btn ${o.paused ? "primary" : ""}" data-act="pause">${ic(o.paused ? "play" : "pause")}${o.paused ? "Resume posting" : "Pause all posting"}</button></div>
-      ${o.posts.length ? `<div class="scroll"><table class="stack"><tr><th>When</th><th>Clip</th><th>Creator</th><th>Account</th><th class="num">Views</th><th></th></tr>
-      ${o.posts.map(p => `<tr><td data-l="Status">${pst(p)}</td><td data-l="Clip" class="c-main">${p.url ? `<a class="lnk" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>` : esc(p.title)}${p.error ? `<div class="err" style="margin:2px 0 0">${esc(p.error)}</div>` : ""}</td><td data-l="Creator">${esc(p.creator_name || "None")}</td><td data-l="Account">${esc(p.account_name)}</td><td data-l="Views" class="num">${p.views ?? "–"}</td>
+    <div class="card"><div class="card-head"><div><h2>Post queue</h2><p class="sub">${o.paused ? "Paused. Recording and clipping carry on; nothing is posted." : o.post_fast ? "Fast mode: uploads go one by one (~3 min YouTube, ~15 min Instagram), with auto-retry." : "Queued clips go out at their scheduled time."}</p></div>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn ${o.post_fast ? "primary" : ""}" data-act="postfast">${o.post_fast ? ic("play") + "Fast on" : ic("clock") + "Fast queue"}</button>
+        <button class="btn ${o.paused ? "primary" : ""}" data-act="pause">${ic(o.paused ? "play" : "pause")}${o.paused ? "Resume posting" : "Pause all posting"}</button></div></div>
+      ${live}${nxt}
+      ${o.posts.length ? `<div class="scroll"><table class="stack queue-table"><tr><th>When</th><th>Clip</th><th>Creator</th><th>Account</th><th class="num">Views</th><th></th></tr>
+      ${o.posts.map(p => `<tr class="${p.status === "posting" ? "row-live" : p.is_next ? "row-next" : ""}"><td data-l="Status">${pst(p)}</td><td data-l="Clip" class="c-main">${p.url ? `<a class="lnk" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>` : esc(p.title)}${p.error ? `<div class="err" style="margin:2px 0 0">${esc(p.error)}</div>` : ""}</td><td data-l="Creator">${esc(p.creator_name || "None")}</td><td data-l="Account">${esc(p.account_name)}</td><td data-l="Views" class="num">${p.views ?? "–"}</td>
         <td class="c-act" style="text-align:right">${p.status === "scheduled" ? `<button class="btn sm" data-act="pcancel" data-id="${p.id}">Cancel</button>` : p.status === "failed" ? `<button class="btn sm" data-act="pretry" data-id="${p.id}">Retry</button>` : ""}</td></tr>`).join("")}</table></div>`
       : `<p class="help">Nothing queued or posted yet.</p>`}</div>`);
 }
@@ -2093,7 +2193,8 @@ async function drawSettings() {
           "Until Google verifies your app, people see a warning when they connect, and uploads stay private."],
         instagram: ["https://developers.facebook.com/apps", "Meta for Developers",
           ["Create a <b>Business</b> app and add <b>Instagram</b> (API setup with Instagram login).",
-           "Under <b>Business login settings</b>, add the address below as a redirect URL.", "Paste the <b>Instagram app ID</b> and <b>Instagram app secret</b> here."],
+           "<b>No redirect on PeakCut:</b> add your Instagram account under step 1 → <b>Generate token</b>, copy it, paste below.",
+           "<b>Or</b> use <b>Connect</b>: under Business login settings add the redirect URL below (needs https). Admin pastes app ID and secret in Set up."],
           "Works with Creator and Business Instagram accounts. Until Meta reviews your app, only accounts you add as testers can connect."],
         tiktok: ["https://developers.tiktok.com/apps", "TikTok for Developers",
           ["Create an app and add <b>Login Kit</b> and <b>Content Posting API</b> with Direct Post turned on.",
@@ -2113,8 +2214,11 @@ async function drawSettings() {
               <label class="f">${esc(st.secret_label)}<input id="app_secret" type="password" placeholder="${st.ready ? "Saved. Paste a new one to replace it" : ""}" autocomplete="off"></label></div>
             <p class="sub">${g[3]}</p>
             <div class="row"><button class="btn primary" data-act="appsave" data-p="${pf}">Save</button><button class="btn ghost" data-act="appsetup" data-p="">Close</button></div></div>` : "";
+        const igTok = pf === "instagram" ? `<div class="igntok"><p class="help">Bina redirect URL: Meta app → <b>Instagram</b> → API setup → step 1 me apna account add karo → <b>Generate token</b> → token yahan paste karo. (Webhooks callback URL mat use karo.)</p>
+          <div class="row" style="align-items:flex-end;gap:8px;flex-wrap:wrap"><label class="f" style="flex:1;min-width:200px;margin:0">Access token<input id="ig_token" type="password" placeholder="Token from Meta Generate token" autocomplete="off" spellcheck="false"></label>
+          <button type="button" class="btn primary" data-act="igtoken">${ic("plus")}Connect with token</button></div></div>` : "";
         return `<div class="appcard"><span class="applogo" style="background:${bg}">${logo}</span>
-          <div class="apptx"><b>${name}</b><span>${desc}</span>${listOf(accs)}</div><div class="appact">${act}</div>${panel}</div>`;
+          <div class="apptx"><b>${name}</b><span>${desc}</span>${listOf(accs)}${igTok}</div><div class="appact">${act}</div>${panel}</div>`;
       };
       body.innerHTML = `<section class="set-sec"><h2>Connected apps</h2><p class="help">Connect the accounts PeakCut posts clips to: press Connect, sign in on the platform's own page, and you're back here. PeakCut never sees your passwords. Then pick which accounts each creator posts to, in that creator's Setup.</p>
         <div class="apps">
@@ -2128,16 +2232,264 @@ async function drawSettings() {
 async function saveSettings() { const d = {}; $$("#sform [data-s]").forEach(i => d[i.dataset.s] = i.value); await send("/api/settings", d, "PUT"); }
 
 /* ============================================================ clip editor */
-function openClip(jid, cid) { D.jid = jid; D.cid = cid; D.sig = ""; drawClipDlg(true); $("#clipdlg").showModal(); }
+const FRAMING_LAYOUTS = [
+  ["stack", "Face + gameplay", "stack"],
+  ["gameplay", "Face in corner", "gameplay"],
+  ["blur", "Blurred fill", "blur"],
+  ["crop", "Fill screen", "crop"],
+  ["zoom", "Zoomed in", "zoom"],
+];
+function framingBlock(j, c, jobWide) {
+  if (!j?.width || !j?.height) return "";
+  if (!jobWide && c.status !== "done") {
+    return `<h3>Facecam & gameplay</h3><p class="help">This clip is still being made. When it is ready, close and open it again — then you can draw the facecam and gameplay boxes.</p>`;
+  }
+  const tiles = FRAMING_LAYOUTS.map(([k, label, prev]) =>
+    `<button type="button" data-frlay="${k}" aria-pressed="${c.layout === k}"><span class="lay-prev ${prev}"><span class="ph"><i></i></span></span>${esc(label)}</button>`).join("");
+  return `<h3>Layout style</h3>
+    <div class="frame-layouts" role="group" aria-label="Clip layout">${tiles}</div>
+    <h3>Frame your moment</h3>
+    <p class="help">Tap <b>Facecam area</b> or <b>Gameplay area</b>, then drag on the wide picture (pink / cyan). These boxes apply to <b>every clip in this video</b> until you change them.${jobWide ? " Press <b>Save for all clips</b> when done." : ""}</p>
+    <div class="frame-tools">
+      <button type="button" class="btn" data-act="findfc">Find facecam</button>
+      <button type="button" class="btn" data-act="dragfc" aria-pressed="false">Facecam area</button>
+      <button type="button" class="btn" data-act="draggm" aria-pressed="false">Gameplay area</button>
+      <button type="button" class="btn" data-act="fullgm">Full gameplay</button>
+    </div>
+    <div class="frame-wrap" id="framing" data-sw="${j.width}" data-sh="${j.height}" data-cid="${esc(c.id)}">
+      <img id="frSrc" src="/media/${esc(j.id)}/framing/${esc(c.id)}/frame.jpg?v=${c.version || 0}" alt="Wide source for facecam framing" decoding="async" draggable="false">
+      <div class="frame-layer" id="frLayer"><div class="frame-box fc" id="frFc" hidden></div><div class="frame-box gm" id="frGm" hidden></div></div>
+    </div>
+    <p class="help" id="frHint">Preparing wide video (first time can take ~20 seconds)…</p>
+    <div class="fr-vert"><small>Your vertical cut</small><canvas id="frVert" width="108" height="192"></canvas></div>`;
+}
+function frRescaleStored(w, v) {
+  const sw = +w.dataset.sw, sh = +w.dataset.sh;
+  const rw = v.naturalWidth, rh = v.naturalHeight;
+  if (!rw || !rh) return;
+  const sx = sw / rw, sy = sh / rh;
+  if (Math.abs(sx - 1) < 0.02 && Math.abs(sy - 1) < 0.02) return;
+  for (const key of ["facecam", "gameplay"]) {
+    let box;
+    try { box = JSON.parse(w.dataset[key] || "null"); } catch { continue; }
+    if (!box || box.length !== 4) continue;
+    w.dataset[key] = JSON.stringify([Math.round(box[0] * sx), Math.round(box[1] * sy),
+      Math.round(box[2] * sx), Math.round(box[3] * sy)]);
+  }
+}
+function frMap() {
+  const w = $("#framing"), v = $("#frSrc"); if (!w || !v) return null;
+  const sw = +w.dataset.sw, sh = +w.dataset.sh;
+  const vr = v.getBoundingClientRect();
+  const vw = sw, vh = sh;
+  const scale = Math.min(vr.width / vw, vr.height / vh) || 1;
+  const dw = vw * scale, dh = vh * scale;
+  return {sw, sh, scale, ox: (vr.width - dw) / 2, oy: (vr.height - dh) / 2, vr, v};
+}
+function frSync() {
+  const w = $("#framing"), m = frMap(); if (!w || !m) return;
+  const place = (el, box) => {
+    if (!el) return;
+    if (!box) { el.hidden = true; return; }
+    el.hidden = false;
+    const [x, y, bw, bh] = box;
+    el.style.left = `${m.ox + x * m.scale}px`;
+    el.style.top = `${m.oy + y * m.scale}px`;
+    el.style.width = `${bw * m.scale}px`;
+    el.style.height = `${bh * m.scale}px`;
+  };
+  let face = null, game = null;
+  try { face = JSON.parse(w.dataset.facecam || "null"); game = JSON.parse(w.dataset.gameplay || "null"); } catch {}
+  place($("#frFc"), face);
+  place($("#frGm"), game);
+  frPreviewVert();
+}
+function frPreviewVert() {
+  const w = $("#framing"), cv = $("#frVert"), img = $("#frSrc"); if (!w || !cv || !img) return;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#17110E"; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (!img.complete || !img.naturalWidth) return;
+  const lay = $("#clipdlg [data-f=layout]")?.value || "blur";
+  let face = null, game = null;
+  try { face = JSON.parse(w.dataset.facecam || "null"); game = JSON.parse(w.dataset.gameplay || "null"); } catch {}
+  const W = cv.width, H = cv.height;
+  const sw = +w.dataset.sw, sh = +w.dataset.sh;
+  const cropDraw = (box, dx, dy, dw, dh) => {
+    if (!box) { ctx.drawImage(img, 0, 0, sw, sh, dx, dy, dw, dh); return; }
+    const [x, y, bw, bh] = box;
+    ctx.drawImage(img, x, y, bw, bh, dx, dy, dw, dh);
+  };
+  if (lay === "stack" && face) {
+    const ch = Math.round(H * 0.32);
+    const drawCover = (box, dx, dy, dw, dh) => {
+      const [x, y, bw, bh] = box || [0, 0, sw, sh];
+      const sc = Math.max(dw / bw, dh / bh);
+      const iw = bw * sc, ih = bh * sc;
+      const sx = x + (bw - dw / sc) / 2, sy = y + (bh - dh / sc) / 2;
+      ctx.drawImage(img, sx, sy, dw / sc, dh / sc, dx, dy, dw, dh);
+    };
+    drawCover(face, 0, 0, W, ch);
+    drawCover(game || [0, 0, sw, sh], 0, ch, W, H - ch);
+    return;
+  }
+  if (lay === "gameplay") {
+    cropDraw([0, 0, sw, sh], 0, 0, W, H);
+    if (face) {
+      const [x, y, bw, bh] = face;
+      const pw = 38, ph = Math.max(12, Math.round(pw * bh / bw));
+      ctx.drawImage(img, x, y, bw, bh, W - pw - 6, 6, pw, ph);
+    }
+  } else {
+    cropDraw([0, 0, sw, sh], 0, 0, W, H);
+  }
+}
+async function frPersistJob(silent) {
+  const w = $("#framing");
+  if (!w || !D.jid) return;
+  const body = {};
+  try { body.facecam = JSON.parse(w.dataset.facecam || "null"); } catch { body.facecam = null; }
+  try { body.gameplay = JSON.parse(w.dataset.gameplay || "null"); } catch { body.gameplay = null; }
+  try {
+    const pub = await send(`/api/jobs/${D.jid}/framing`, body);
+    const ix = S.jobs.findIndex(x => x.id === pub.id);
+    if (ix >= 0) S.jobs[ix] = pub;
+    if (!silent) toast("Saved for all clips in this video", "ok");
+  } catch (e) { toast(e.message, "bad"); }
+}
+function initFraming(j, c) {
+  const w = $("#framing"); if (!w) return;
+  w.dataset.facecam = JSON.stringify(c.facecam || j.facecam || null);
+  w.dataset.gameplay = JSON.stringify(c.gameplay || j.gameplay || null);
+  const v = $("#frSrc");
+  const ok = () => { frRescaleStored(w, v); $("#frHint")?.setAttribute("hidden", ""); frSync(); };
+  v?.addEventListener("loadedmetadata", ok);
+  v?.addEventListener("load", ok);
+  v?.addEventListener("error", () => {
+    const h = $("#frHint"); if (h) { h.removeAttribute("hidden"); h.textContent = "Wide video did not load. Restart PeakCut (python -m studio.server), hard-refresh (Ctrl+Shift+R), open this clip again."; }
+    toast("Could not load wide source. Restart PeakCut and hard-refresh the page.", "bad");
+  });
+  requestAnimationFrame(frSync);
+  w._rub = null;
+  const frLayPick = b => {
+    const lay = $("#clipdlg [data-f=layout]");
+    if (lay) lay.value = b.dataset.frlay;
+    $$("#clipdlg [data-frlay]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    frPreviewVert();
+  };
+  $$("#clipdlg [data-frlay]").forEach(b => b.addEventListener("click", () => frLayPick(b)));
+  const setDrawBtn = () => {
+    $$(".frame-tools [data-act=dragfc],.frame-tools [data-act=draggm]").forEach(b => {
+      b.setAttribute("aria-pressed", String(b.dataset.act === (w._mode === "gm" ? "draggm" : w._mode === "fc" ? "dragfc" : "")));
+    });
+  };
+  const boxEl = e => e.target.closest(".frame-box");
+  const down = e => {
+    const hit = boxEl(e);
+    if (hit && !w._mode) {
+      const m = frMap(); if (!m) return;
+      const key = hit.id === "frFc" ? "facecam" : "gameplay";
+      let box; try { box = JSON.parse(w.dataset[key]); } catch { return; }
+      if (!box) return;
+      w._drag = {key, box: box.slice(), ox: e.clientX, oy: e.clientY, pid: e.pointerId};
+      try { w.setPointerCapture(e.pointerId); } catch {}
+      e.preventDefault();
+      return;
+    }
+    if (!w._mode) return;
+    const m = frMap(); if (!m) return;
+    const px = e.clientX - m.vr.left - m.ox, py = e.clientY - m.vr.top - m.oy;
+    w._rub = {mode: w._mode === "gm" ? "gm" : "fc", x0: px, y0: py, x1: px, y1: py, el: document.createElement("div"), pid: e.pointerId};
+    w._rub.el.className = "frame-rub";
+    $("#frLayer").append(w._rub.el);
+    try { w.setPointerCapture(e.pointerId); } catch {}
+    e.preventDefault();
+  };
+  const move = e => {
+    if (w._drag && w._drag.pid === e.pointerId) {
+      const m = frMap(); if (!m) return;
+      const dx = Math.round((e.clientX - w._drag.ox) / m.scale), dy = Math.round((e.clientY - w._drag.oy) / m.scale);
+      w._drag.ox = e.clientX; w._drag.oy = e.clientY;
+      const b = w._drag.box;
+      b[0] = Math.max(0, Math.min(m.sw - b[2], b[0] + dx));
+      b[1] = Math.max(0, Math.min(m.sh - b[3], b[1] + dy));
+      w.dataset[w._drag.key] = JSON.stringify(b);
+      frSync();
+      return;
+    }
+    if (!w._rub || w._rub.pid !== e.pointerId) return;
+    const m = frMap(); if (!m) return;
+    w._rub.x1 = e.clientX - m.vr.left - m.ox;
+    w._rub.y1 = e.clientY - m.vr.top - m.oy;
+    const x = Math.min(w._rub.x0, w._rub.x1) + m.ox, y = Math.min(w._rub.y0, w._rub.y1) + m.oy;
+    const bw = Math.abs(w._rub.x1 - w._rub.x0), bh = Math.abs(w._rub.y1 - w._rub.y0);
+    Object.assign(w._rub.el.style, {left: `${x}px`, top: `${y}px`, width: `${bw}px`, height: `${bh}px`});
+  };
+  const up = e => {
+    if (w._drag && (!e || w._drag.pid === e.pointerId)) {
+      w._drag = null;
+      frPersistJob(true);
+      return;
+    }
+    if (!w._rub || (e && w._rub.pid !== e.pointerId)) return;
+    const mode = w._rub.mode;
+    const m = frMap(); if (!m) return;
+    const rx = Math.min(w._rub.x0, w._rub.x1), ry = Math.min(w._rub.y0, w._rub.y1);
+    const bw = Math.abs(w._rub.x1 - w._rub.x0), bh = Math.abs(w._rub.y1 - w._rub.y0);
+    w._rub.el.remove(); w._rub = null; w._mode = null; w.classList.remove("drawing");
+    setDrawBtn();
+    if (bw < 8 || bh < 8) return;
+    const sx = Math.max(0, Math.min(m.sw, Math.round(rx / m.scale)));
+    const sy = Math.max(0, Math.min(m.sh, Math.round(ry / m.scale)));
+    const box = [sx, sy, Math.min(m.sw - sx, Math.round(bw / m.scale)), Math.min(m.sh - sy, Math.round(bh / m.scale))];
+    w.dataset[mode === "gm" ? "gameplay" : "facecam"] = JSON.stringify(box);
+    frSync();
+    frPersistJob();
+  };
+  w.addEventListener("pointerdown", down);
+  w.addEventListener("pointermove", move);
+  w.addEventListener("pointerup", up);
+  w.addEventListener("pointercancel", up);
+  w._down = down; w._move = move; w._up = up;
+  w._setDrawBtn = setDrawBtn;
+  $("#clipdlg [data-f=layout]")?.addEventListener("change", () => {
+    const v = $("#clipdlg [data-f=layout]").value;
+    $$("#clipdlg [data-frlay]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.frlay === v)));
+    frPreviewVert();
+  });
+}
+function openClip(jid, cid) { D.jid = jid; D.cid = cid; D.sig = ""; D.jobFrame = false; drawClipDlg(true); $("#clipdlg").showModal(); }
+function openJobFraming(jid) {
+  const j = jobOf(jid);
+  if (!j?.width) return toast("Video size not ready yet.", "bad");
+  const c = j.clips.find(x => x.status === "done") || j.clips[0];
+  if (!c) return toast("No clips in this video yet.", "bad");
+  D.jid = jid; D.cid = c.id; D.jobFrame = true;
+  const ref = { ...c, layout: "stack", facecam: j.facecam || c.facecam, gameplay: j.gameplay || c.gameplay };
+  const dlg = $("#framedlg");
+  dlg.innerHTML = `<form method="dialog" class="dlg" style="padding:20px"><h2>Face & gameplay — all clips</h2>
+    <p class="help">${esc(j.title || j.source?.name || "This video")}: one setup for every clip. Auto-post waits until you save here (if enabled in creator Setup).</p>
+    ${framingBlock(j, ref, true)}
+    <label class="sw" style="margin-top:12px"><input type="checkbox" id="frSaveDef"> Save face & gameplay as my default for <b>new</b> videos</label>
+    <div class="row" style="margin-top:14px;gap:8px"><button type="button" class="btn primary" data-act="jobfrsave">Save & re-make all clips</button>
+      <button type="button" class="btn" data-act="closefrdlg">Close</button></div></form>`;
+  dlg.showModal();
+  initFraming(j, ref);
+  const stack = $("#framedlg [data-frlay='stack']");
+  if (stack) { const lay = stack.closest(".frame-layouts")?.querySelector("[data-f=layout]"); if (lay) lay.value = "stack"; stack.click(); }
+}
 function drawClipDlg(full) {
   const j = jobOf(D.jid), c = j?.clips.find(x => x.id === D.cid), dlg = $("#clipdlg");
   if (!c) { if (dlg.open) dlg.close(); return; }
   const m = `/media/${j.id}/`, sig = c.status + c.version;
+  const frameUi = j?.width ? framingBlock(j, c) : "";
   const stage = c.status === "done" ? `<video src="${m}${esc(c.file)}?v=${c.version}" poster="${m}${esc(c.cover)}?v=${c.version}" controls autoplay playsinline></video>`
     : c.status === "error" ? `<div class="err" style="padding:20px;text-align:center">${esc(c.error || "Could not make this clip.")}</div>`
     : `<span class="making">${c.status === "rendering" ? "Making this clip…" : "Waiting its turn…"}</span>`;
   if (full) {
-    dlg.innerHTML = `<div class="editor"><div class="stage" id="stage">${stage}</div>
+    const old = $("#framing");
+    if (old?._down) { old.removeEventListener("pointerdown", old._down); old.removeEventListener("pointermove", old._move); old.removeEventListener("pointerup", old._up); old.removeEventListener("pointercancel", old._up); }
+    dlg.innerHTML = `<div class="editor${frameUi ? " wide" : ""}"><div class="stage" id="stage">${stage}</div>
+      ${frameUi ? `<div class="panel frame-panel">${frameUi}</div>` : ""}
       <div class="panel">
         <div class="job-head" style="margin:0"><div><span class="badge ${scoreCls(c.score)}" style="position:static">${c.judges ? "Words " + c.judges.words + (c.judges.reaction ? " · Reaction " + c.judges.reaction : "") : c.score ? "Score " + c.score : "Clipped by hand"}</span>
           <p class="sub" style="margin-top:8px">${esc(c.reason || "")}</p></div><button class="btn icon ghost" data-act="closedlg" aria-label="Close">${ic("x")}</button></div>
@@ -2161,11 +2513,13 @@ function drawClipDlg(full) {
           ${c.status === "done" ? `<a class="btn" href="${m}${esc(c.file)}?download=1">${ic("down")}Download</a>` : ""}
           <button class="btn" data-act="copy" data-j="${j.id}" data-c="${esc(c.id)}">${ic("copy")}Copy post text</button></div>
       </div></div>`;
+    if (frameUi) initFraming(j, c);
   } else if (D.sig !== sig) $("#stage").innerHTML = stage;
   D.sig = sig;
   put($("#dposts"), postPills(c));
 }
-$("#clipdlg").addEventListener("close", () => { $("#clipdlg").innerHTML = ""; D.jid = null; });
+$("#clipdlg").addEventListener("close", () => { $("#clipdlg").innerHTML = ""; if (!D.jobFrame) D.jid = null; });
+$("#framedlg")?.addEventListener("close", () => { $("#framedlg").innerHTML = ""; D.jobFrame = false; });
 $("#clipdlg").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
 
 /* ============================================================ render + polling */
@@ -2180,8 +2534,15 @@ async function tick() {
     const got = await api("/api/sync?v=" + encodeURIComponent(S.syncV || ""));
     const fresh = !!got.jobs, stale = Date.now() - (S.ovAt || 0) > 20000;
     S.syncV = got.v;
-    if (!fresh) {                                   // nothing of ours changed on the server
-      if (S.view === "overview" && stale) { S.overview = await api("/api/overview"); S.ovAt = Date.now(); render(); }
+    const postBusy = S.overview?.queue_progress?.active || (S.overview?.queue_progress?.waiting > 0 && !S.overview?.paused);
+    if (!fresh) {
+      if (postBusy) {
+        const sync = await api("/api/sync?v=" + encodeURIComponent(S.syncV || ""));
+        S.syncV = sync.v;
+        if (sync.jobs) S.jobs = sync.jobs;
+        if (S.view === "overview") { S.overview = await api("/api/overview"); S.ovAt = Date.now(); }
+        render();
+      } else if (S.view === "overview" && stale) { S.overview = await api("/api/overview"); S.ovAt = Date.now(); render(); }
       return;
     }
     const {jobs, creators, accounts} = got;
@@ -2210,9 +2571,9 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("focus", () => { if (!document.hidden) tick(); });
 function loop() {
   const active = S.jobs.some(j => ["queued", "running", "live"].includes(j.status) || j.clips.some(c => c.status === "queued" || c.status === "rendering"));
-  // quick while something is being made, relaxed otherwise, and slow when the tab is in the background
+  const posting = S.overview?.queue_progress?.active || (S.overview?.queue_progress?.waiting > 0 && !S.overview?.paused);
   const waiting = S.creators.some(c => (c.channels && Object.keys(c.channels).length && !c.profile?.pic) || c.live_job && !jobOf(c.live_job));
-  setTimeout(async () => { await tick(); loop(); }, document.hidden ? 20000 : waiting ? 1000 : active ? 2000 : 4000);
+  setTimeout(async () => { await tick(); loop(); }, document.hidden ? 20000 : posting ? 1500 : waiting ? 1000 : active ? 2000 : 4000);
 }
 
 /* ============================================================ actions */
@@ -2344,6 +2705,12 @@ document.addEventListener("click", async e => {
     }
     if (a === "dlall") return zipDownload((jobOf(d.j)?.clips || []).filter(c => c.status === "done").map(c => d.j + "." + c.id));
     if (a === "seldl") return zipDownload(selClips());
+    if (a === "selpost") return openBulkPostDialog(bulkClipKeys(selClips()), "Post selected clips");
+    if (a === "postalljob") {
+      const j = jobOf(d.j);
+      const keys = (j?.clips || []).filter(c => c.status === "done").map(c => [j.id, c.id]);
+      return openBulkPostDialog(keys, `Post all — ${j?.title || "this video"}`);
+    }
     if (a === "selclear") { sel().clear(); return render(); }
     if (a === "selall") {
       const cid = creatorId();
@@ -2372,6 +2739,28 @@ document.addEventListener("click", async e => {
       if (!typed) return;
       await send("/api/account/delete", {confirm: typed});
       location.href = "/"; return;
+    }
+    if (a === "jobframe") { openJobFraming(d.j); return; }
+    if (a === "closefrdlg") { $("#framedlg")?.close(); return; }
+    if (a === "jobfrsave") {
+      const w = $("#framing"); if (!w || !D.jid) return;
+      let f, g;
+      try { f = JSON.parse(w.dataset.facecam || "null"); g = JSON.parse(w.dataset.gameplay || "null"); } catch { return toast("Could not read the boxes.", "bad"); }
+      if (!f || !g) return toast("Draw both facecam (pink) and gameplay (cyan), or use Find facecam + Full gameplay.", "bad");
+      b.disabled = true;
+      try {
+        await send(`/api/jobs/${D.jid}/framing`, {facecam: f, gameplay: g, layout: "stack", remake: true, save_default: !!$("#frSaveDef")?.checked, queue_autopost: true});
+        toast("Saved for all clips. Re-making in the background…", "ok");
+        $("#framedlg")?.close();
+        return tick();
+      } catch (e) { toast(e.message, "bad"); } finally { b.disabled = false; }
+      return;
+    }
+    if (a === "canceljob") {
+      if (!await ask("Stop making this video?", "Clipping stops. Anything already finished stays; the rest is not made.", "Stop", true)) return;
+      b.disabled = true;
+      try { await send(`/api/jobs/${d.j}/cancel`, {}); toast("Stopped", "ok"); } catch (e) { toast(e.message, "bad"); }
+      return tick();
     }
     if (a === "deljob") {
       if (!await ask("Delete this video?", "The video and all of its clips are permanently deleted. This cannot be undone.", "Delete", true)) return;
@@ -2447,6 +2836,13 @@ document.addEventListener("click", async e => {
     if (a === "csave") return void await saveCreator();
     if (a === "cdiscard") { drawCreatorForm(); return toast("Changes discarded"); }
     if (a === "pause") { await send("/api/settings", {paused:!S.overview.paused}, "PUT"); return loadOverview(); }
+    if (a === "postfast") {
+      const on = !S.overview?.post_fast;
+      if (on && !await ask("Fast queue?", "PeakCut will upload one clip at a time (~3 min between YouTube posts, ~15 min on Instagram). Failed uploads retry automatically. Instagram may still rate-limit if you go too hard.", "Turn on fast")) return;
+      await send("/api/settings", {post_fast: on}, "PUT");
+      if (on) try { await send("/api/posts/accelerate", {}); toast("Queue packed — uploading one by one", "ok"); } catch (e) { toast(e.message, "bad"); }
+      return loadOverview();
+    }
     if (a === "pcancel" || a === "pretry") { await api(`/api/posts/${d.id}/${a === "pcancel" ? "cancel" : "retry"}`, {method:"POST"}); return loadOverview(); }
     if (a === "ssave") { await saveSettings(); toast("Saved", "ok"); return drawSettings(); }
     if (a === "plansave") {
@@ -2454,14 +2850,74 @@ document.addEventListener("click", async e => {
       await send("/api/settings", {plans:p}, "PUT"); S.status = await api("/api/status"); toast("Plans saved", "ok"); return drawSettings();
     }
     if (a === "testalert") { await saveSettings(); await api("/api/alerts/test", {method:"POST"}); return toast("Test message sent. Check your phone.", "ok"); }
+    if (a === "igtoken") {
+      const token = $("#ig_token")?.value.trim();
+      if (!token) return toast("Paste the token from Meta → Generate token.", "bad");
+      b.disabled = true;
+      try {
+        const r = await send("/api/accounts/instagram/token", {token});
+        toast(`${r.name || "Instagram"} connected`, "ok");
+        await tick();
+        return drawSettings();
+      } catch (e) { toast(e.message, "bad"); }
+      finally { b.disabled = false; }
+      return;
+    }
     if (a === "accremove") {
       if (!await ask("Disconnect this account?", "Posts still waiting for it will fail.", "Disconnect", true)) return;
       await api(`/api/accounts/${d.id}`, {method:"DELETE"}); await tick(); return drawSettings();
+    }
+    if (a === "findfc") {
+      const r = await send(`/api/jobs/${D.jid}/detect-facecam`, {clip: D.cid});
+      const w = $("#framing");
+      if (r.facecam && w) {
+        w.dataset.facecam = JSON.stringify(r.facecam);
+        frSync();
+        const ix = S.jobs.findIndex(x => x.id === D.jid);
+        if (ix >= 0 && r.facecam) {
+          S.jobs[ix].facecam = r.facecam;
+          S.jobs[ix].clips?.forEach(cl => { cl.facecam = r.facecam; });
+        }
+        toast("Facecam saved for every clip", "ok");
+      } else toast("No facecam found — draw the pink box yourself.", "bad");
+      return;
+    }
+    if (a === "fullgm") {
+      const w = $("#framing"); if (!w) return;
+      const sw = +w.dataset.sw, sh = +w.dataset.sh;
+      w.dataset.gameplay = JSON.stringify([0, 0, sw, sh]);
+      frSync();
+      frPersistJob();
+      return;
+    }
+    if (a === "dragfc" || a === "draggm") {
+      const w = $("#framing"), lay = $("#clipdlg [data-f=layout]");
+      if (lay && !["gameplay", "stack"].includes(lay.value)) {
+        lay.value = "stack";
+        $$("#clipdlg [data-frlay]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.frlay === "stack")));
+        frPreviewVert();
+      }
+      if (w) {
+        w._mode = a === "draggm" ? "gm" : "fc";
+        w.classList.add("drawing");
+        w._setDrawBtn?.();
+        toast(a === "draggm" ? "Now drag on the wide picture for gameplay (cyan box)" : "Now drag on the wide picture for facecam (pink box)", "ok");
+      }
+      return;
     }
     if (a === "remake") {
       const body = {}; $$("#clipdlg [data-f]").forEach(i => {
         body[i.dataset.f] = i.type === "checkbox" ? i.checked : i.type === "number" ? Number(i.value) : i.value;
       });
+      const fr = $("#framing");
+      if (fr) {
+        try {
+          const f = JSON.parse(fr.dataset.facecam || "null");
+          const g = JSON.parse(fr.dataset.gameplay || "null");
+          if (f) { body.facecam = f; if (!["gameplay", "stack"].includes(body.layout)) body.layout = "stack"; }
+          if (g) body.gameplay = g;
+        } catch {}
+      }
       await send(`/api/jobs/${D.jid}/clips/${D.cid}/render`, body); toast("Re-making the clip…", "ok"); return tick();
     }
     if (a === "postnow" || a === "postqueue") {

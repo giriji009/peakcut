@@ -79,7 +79,8 @@ def install_fonts():
 
 
 LAYOUTS = {"blur": "Full frame + blurred fill", "zoom": "Zoomed in + blurred fill", "crop": "Fill the screen (centre crop)",
-           "gameplay": "Gameplay fills the screen, facecam in the corner"}
+           "gameplay": "Gameplay fills the screen, facecam in the corner",
+           "stack": "Facecam on top, gameplay below (stream layout)"}
 
 
 def _ts(t):
@@ -120,6 +121,9 @@ def geometry(src_w, src_h, layout):
     else:
         fg_h = H
     top = (H - fg_h) // 2
+    if layout == "stack":
+        ch = _stack_band_h()
+        return layout, H, ch + 42, min(1640, int(H * 0.78))
     if layout in ("crop", "gameplay"):
         return layout, fg_h, 300, 1380
     return layout, fg_h, max(230, top - 190), min(1640, top + fg_h + 180)
@@ -230,19 +234,59 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 PIP_W = 380            # how wide the facecam is in the 1080-wide frame
 PIP_MARGIN = 26
+STACK_TOP = 0.32          # same as NeonClipping: face band = top 32% of the 9:16 frame
 
 
-def _filter(layout, fg_h, facecam=None):
+def _stack_band_h() -> int:
+    return max(2, int(round(H * STACK_TOP)) // 2 * 2)
+
+
+def _fill_layer(w: int, h: int, prefix: str, out_label: str) -> str:
+    """Fill the whole band (zoom slightly if needed) — no black letterbox, like NeonClipping stack."""
+    return f"{prefix}scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1[{out_label}];"
+
+
+def _pip_pos(facecam, pip_h, src_w=1920, src_h=1080):
+    """Put the PiP on the opposite corner from the facecam box in the source."""
+    fx, fy, fw, fh = (int(v) for v in facecam)
+    right = fx + fw / 2 > src_w / 2
+    low = fy + fh / 2 > src_h / 2
+    ox = W - PIP_W - PIP_MARGIN if right else PIP_MARGIN
+    oy = H - pip_h - PIP_MARGIN if low else PIP_MARGIN
+    return ox, oy
+
+
+def _stack_filter(facecam, gameplay=None):
+    fx, fy, fw, fh = (int(v) for v in facecam)
+    cam_h = _stack_band_h()
+    game_h = H - cam_h
+    cam_part = _fill_layer(W, cam_h, f"[cam]crop={fw}:{fh}:{fx}:{fy},", "ctop")
+    if gameplay and len(gameplay) == 4:
+        gx, gy, gw, gh = (int(v) for v in gameplay)
+        game_part = _fill_layer(W, game_h, f"[g]crop={gw}:{gh}:{gx}:{gy},", "cbot")
+    else:
+        game_part = _fill_layer(W, game_h, "[g]", "cbot")
+    return (f"[0:v]fps={config.OUT_FPS},split=2[cam][g];"
+            f"{cam_part}"
+            f"{game_part}"
+            f"[cbot]pad={W}:{H}:0:{cam_h}:black[b0];"
+            f"[b0][ctop]overlay=0:0:shortest=1[v0];")
+
+
+def _filter(layout, fg_h, facecam=None, gameplay=None, src_w=1920, src_h=1080):
+    if layout == "stack" and facecam and len(facecam) == 4 and facecam[2] > 8 and facecam[3] > 8:
+        return _stack_filter(facecam, gameplay)
     if layout == "gameplay" and facecam:
-        # The game fills the screen, and the webcam sits in the top corner of it, so a viewer sees
+        # The game fills the screen, and the webcam sits in the corner of it, so a viewer sees
         # the play and the face at the same time.
         fx, fy, fw, fh = (int(v) for v in facecam)
         if fw > 8 and fh > 8:
             pip_h = max(2, int(round(PIP_W * fh / fw)))
+            ox, oy = _pip_pos(facecam, pip_h, src_w, src_h)
             return (f"[0:v]fps={config.OUT_FPS},split=2[base][fc];"
                     f"[base]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[b];"
                     f"[fc]crop={fw}:{fh}:{fx}:{fy},scale={PIP_W}:{pip_h},setsar=1[p];"
-                    f"[b][p]overlay={W - PIP_W - PIP_MARGIN}:{PIP_MARGIN}[v0];")
+                    f"[b][p]overlay={ox}:{oy}[v0];")
     if layout == "crop" or (layout == "gameplay" and not facecam):
         return f"[0:v]fps={config.OUT_FPS},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[v0];"
     return (f"[0:v]fps={config.OUT_FPS},split=2[a][b];"
@@ -255,6 +299,8 @@ def _filter(layout, fg_h, facecam=None):
 def _hook_y(layout, hook_y, facecam=None):
     """Where the heading goes. In the gameplay layout the webcam sits in the top corner, so a heading
     across the top would run under it: it goes just below the picture instead."""
+    if layout == "stack":
+        return _stack_band_h() + 42
     if layout == "gameplay" and facecam and len(facecam) == 4 and facecam[2] > 8:
         return PIP_MARGIN + int(round(PIP_W * facecam[3] / facecam[2])) + 32
     return hook_y
@@ -270,6 +316,9 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
     start, end = clip["start"], clip["end"]
     layout, fg_h, hook_y, cap_y = geometry(src_w, src_h, clip.get("layout", "blur"))
     face = clip.get("facecam")
+    game = clip.get("gameplay")
+    if layout == "stack" and not (face and len(face) == 4):
+        layout = "crop"
     if layout == "gameplay" and not (face and len(face) == 4):
         layout = "crop"     # no webcam found: the game fills the screen, which is still the right shape
     hook_y = _hook_y(layout, hook_y, face)
@@ -281,18 +330,20 @@ def render_clip(src: Path, out_dir: Path, name: str, clip: dict, words: list, sr
     # break the filter syntax).
     work = Path(tempfile.mkdtemp(prefix="pk"))
     try:
-        return _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass, face=face)
+        return _render_in(work, src, out_dir, name, start, end, layout, fg_h, ass,
+                          face=face, gameplay=game, src_w=src_w, src_h=src_h)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layout, fg_h, ass: str, face=None) -> dict:
+def _render_in(work: Path, src: Path, out_dir: Path, name: str, start, end, layout, fg_h, ass: str,
+               face=None, gameplay=None, src_w=1920, src_h=1080) -> dict:
     global _qsv_ok
     (work / f"{name}.ass").write_text(ass, encoding="utf-8")
     (work / "f").mkdir()
     for f in config.FONTS_DIR.glob("*.ttf"):
         shutil.copyfile(f, work / "f" / f.name)
-    fc = _filter(layout, fg_h, face) + f"[v0]ass={name}.ass:fontsdir=f[v]"
+    fc = _filter(layout, fg_h, face, gameplay, src_w, src_h) + f"[v0]ass={name}.ass:fontsdir=f[v]"
     base = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}", "-i", str(src),
             "-filter_complex", fc, "-map", "[v]", "-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", "-pix_fmt"]

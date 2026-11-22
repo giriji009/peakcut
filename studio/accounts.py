@@ -24,6 +24,7 @@ _states: dict = {}   # one-time values for the connect redirects: state -> (user
 
 SECRET_KEYS = ("discord_webhook", "telegram_token")
 SETTING_DEFAULTS = {"discord_webhook": "", "telegram_token": "", "telegram_chat": "", "paused": False,
+                    "post_fast": False, "post_no_tags": False, "post_footer": "",
                     "digest_hour": 8, "last_digest": "", "tour_done": False}
 
 YT_SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
@@ -250,10 +251,12 @@ def save_settings(patch: dict) -> dict:
         for k, v in patch.items():
             if k not in SETTING_DEFAULTS:
                 continue
-            if k in ("paused", "tour_done"):
+            if k in ("paused", "tour_done", "post_fast", "post_no_tags"):
                 v = bool(v)
             elif k == "digest_hour":
                 v = max(0, min(23, int(v)))
+            elif k == "post_footer":
+                v = str(v).strip()[:4000]
             else:
                 v = str(v).strip()[:300]
                 if k == "discord_webhook" and v and not v.startswith("https://discord.com/api/webhooks/"):
@@ -348,11 +351,38 @@ def youtube_upload(acc, path: Path, title: str, description: str, tags: list, pr
                               params={"uploadType": "resumable", "part": "snippet,status"}, json=meta,
                               headers={"Authorization": f"Bearer {token}", "X-Upload-Content-Type": "video/mp4",
                                        "X-Upload-Content-Length": str(size)}, timeout=60), "Starting the YouTube upload")
+    timeout = max(900, min(3600, size // (200 * 1024)))  # large Shorts get more time
     with path.open("rb") as f:
         done = _check(httpx.put(start.headers["Location"], content=f.read(),
-                                headers={"Authorization": f"Bearer {token}", "Content-Type": "video/mp4"}, timeout=900),
+                                headers={"Authorization": f"Bearer {token}", "Content-Type": "video/mp4"},
+                                timeout=timeout),
                       "Uploading to YouTube").json()
     return done["id"], f"https://www.youtube.com/shorts/{done['id']}"
+
+
+def youtube_delete(acc, video_id: str) -> bool:
+    """Remove a Short from YouTube (duplicate cleanup)."""
+    if not video_id:
+        return False
+    r = httpx.delete("https://www.googleapis.com/youtube/v3/videos", params={"id": video_id},
+                     headers={"Authorization": f"Bearer {_yt_token(acc)}"}, timeout=60)
+    if r.status_code in (200, 204, 404):
+        return True
+    if r.status_code == 403:
+        raise RuntimeError("YouTube would not let PeakCut delete that video (permissions?).")
+    raise RuntimeError(f"YouTube delete failed ({r.status_code}): {r.text[:200]}")
+
+
+def instagram_delete(acc, media_id: str) -> bool:
+    """Remove a Reel from Instagram (duplicate cleanup)."""
+    if not media_id:
+        return False
+    r = httpx.delete(f"{IG}/{media_id}", headers={"Authorization": f"Bearer {_ig_token(acc)}"}, timeout=60)
+    if r.status_code in (200, 404):
+        return True
+    if r.status_code == 400 and "does not exist" in r.text.lower():
+        return True
+    raise RuntimeError(f"Instagram delete failed ({r.status_code}): {r.text[:200]}")
 
 
 def youtube_views(acc, ids: list) -> dict:
@@ -394,8 +424,16 @@ def _instagram_save(token: str) -> dict:
 
 
 def instagram_add(token: str) -> dict:
-    """An account added with a token pasted from the Meta app dashboard (older way; Connect is the normal one)."""
-    return _instagram_save(token.strip())
+    """Connect from a token copied in Meta (API setup → Generate token). No OAuth redirect on PeakCut."""
+    token = (token or "").strip()
+    if len(token) < 30:
+        raise ValueError("Paste the full Instagram access token from Meta.")
+    me = _check(httpx.get(f"{IG}/me", params={"fields": "user_id,username,account_type"},
+                          headers={"Authorization": f"Bearer {token}"}, timeout=30), "Checking the Instagram token").json()
+    kind = str(me.get("account_type") or "").upper()
+    if kind not in ("BUSINESS", "MEDIA_CREATOR"):
+        raise ValueError("This account must be a Creator or Business Instagram account.")
+    return _instagram_save(token)
 
 
 def _ig_token(acc) -> str:
@@ -411,24 +449,19 @@ def _ig_token(acc) -> str:
 
 
 def instagram_upload(acc, path: Path, caption: str, job_id: str = ""):
-    """A Reel. On a public site Instagram fetches the clip from a one-hour signed link; on a computer it cannot
-    reach, the file is sent instead (only possible for some app types)."""
+    """A Reel. Instagram Login (PeakCut's Connect / Meta token) only accepts a public https video_url — Meta
+    fetches the clip from a short-lived signed link. Resumable upload needs Facebook Login for Business, not this flow."""
     token = _ig_token(acc)
     auth = {"Authorization": f"Bearer {token}"}
     uid = acc["user_id"]
-    if config.PUBLIC_URL.startswith("https://") and job_id:
-        box = _check(httpx.post(f"{IG}/{uid}/media", data={"media_type": "REELS", "video_url": clip_link(job_id, path.name),
-                                                           "caption": caption[:2200], "share_to_feed": "true"},
-                                headers=auth, timeout=60), "Starting the Instagram post").json()
-    else:
-        box = _check(httpx.post(f"{IG}/{uid}/media", data={"media_type": "REELS", "upload_type": "resumable",
-                                                           "caption": caption[:2200], "share_to_feed": "true"},
-                                headers=auth, timeout=60), "Starting the Instagram upload").json()
-        with path.open("rb") as f:
-            _check(httpx.post(f"{IG_UPLOAD}/{box['id']}", content=f.read(),
-                              headers={"Authorization": f"OAuth {token}", "offset": "0",
-                                       "file_size": str(path.stat().st_size)}, timeout=900),
-                   "Uploading to Instagram (posting from a computer needs a public https address)")
+    if not config.PUBLIC_URL.startswith("https://") or not job_id:
+        raise RuntimeError(
+            "Instagram cannot fetch clips from http://127.0.0.1. Run a public https tunnel "
+            "(cloudflared or ngrok), set PEAKCUT_PUBLIC_URL to that https address in .env, restart PeakCut, then retry the post.")
+    link = clip_link(job_id, path.name)
+    box = _check(httpx.post(f"{IG}/{uid}/media", data={"media_type": "REELS", "video_url": link,
+                                                       "caption": caption[:2200], "share_to_feed": "true"},
+                            headers=auth, timeout=60), "Starting the Instagram post").json()
     for _ in range(90):
         st = _check(httpx.get(f"{IG}/{box['id']}", params={"fields": "status_code,status"}, headers=auth, timeout=30),
                     "Checking the Instagram upload").json()

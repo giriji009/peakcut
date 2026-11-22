@@ -180,7 +180,29 @@ def save(job):
             return
         tmp = d / "job.json.tmp"
         tmp.write_text(text, encoding="utf-8")
-        tmp.replace(d / "job.json")
+        target = d / "job.json"
+        for attempt in range(10):
+            try:
+                tmp.replace(target)
+                return
+            except PermissionError:
+                time.sleep(0.12 * (attempt + 1))
+        tmp.replace(target)
+
+
+_prog_last_save: dict[str, float] = {}
+
+
+def _set_progress(job, progress: float):
+    """Move the progress bar in memory; job.json at most ~every 2s so Windows doesn't lock it during yt-dlp."""
+    with _lock:
+        job["progress"] = max(job.get("progress") or 0, progress)
+    now = time.time()
+    jid = job.get("id") or ""
+    if now - _prog_last_save.get(jid, 0) < 2.0:
+        return
+    _prog_last_save[jid] = now
+    save(job)
 
 
 def _set(job, **kw):
@@ -211,7 +233,9 @@ def _load_file(f: Path, uid: str):
         job["source_path"] = _remap(job["source_path"], f.parent)
     if job.get("source", {}).get("path"):
         job["source"]["path"] = _remap(job["source"]["path"], f.parent)
-    if job.get("status") in ("queued", "running") and job.get("kind") != "live":
+    if job.get("_cancel") or (job.get("status") == "error" and job.get("stage") == "Cancelled"):
+        job.pop("resume", None)
+    elif job.get("status") in ("queued", "running") and job.get("kind") != "live":
         # Picked up again as soon as the server is back (jobs.start), from the last finished part of the transcript.
         job.update(status="queued", stage="Picking up where it stopped", error=None, resume=True)
     if job.get("status") == "live":
@@ -297,6 +321,10 @@ def create(source: dict, options: dict, enqueue=True, creator=None, kind="video"
     job = {"id": jid, "user": ctx.uid(), "kind": kind, "creator": creator, "dir": str(d), "created": time.time(), "source": source,
            "options": opts, "status": "queued", "stage": "Waiting", "progress": 0.0,
            "title": source.get("name", ""), "uploader": "", "duration": 0, "clips": [], "error": None, "ai": {}}
+    if c:
+        for src, dst in (("default_facecam", "facecam"), ("default_gameplay", "gameplay")):
+            if c.get(src):
+                job[dst] = list(c[src])
     d.mkdir(parents=True)
     with _lock:
         _jobs[jid] = job
@@ -342,6 +370,108 @@ def delete(jid):
     return bool(job)
 
 
+class JobCancelled(RuntimeError):
+    pass
+
+
+def _check_cancel(job):
+    if job.get("_cancel"):
+        raise JobCancelled("Cancelled by you.")
+
+
+def cancel_job(jid: str) -> dict:
+    """Stop a queued or running video job. A clip re-make that is already rendering is left to finish."""
+    from . import live
+    job = _jobs.get(jid) or get(jid)
+    if not job:
+        raise ValueError("No such video.")
+    if job.get("kind") == "live" or jid in live.SESSIONS:
+        raise ValueError("This is a live recording. Use Stop recording instead.")
+    if job.get("status") not in ("queued", "running"):
+        raise ValueError("This video is not being worked on right now.")
+    job["_cancel"] = True
+    if job.get("status") == "queued":
+        _set(job, status="error", error="Cancelled by you.", stage="Cancelled", progress=0)
+    else:
+        _set(job, stage="Stopping…", error=None)
+    save(job)
+    return job
+
+
+def _norm_framing_box(job, v) -> list:
+    if not isinstance(v, (list, tuple)) or len(v) != 4:
+        raise ValueError("Framing boxes need four numbers: x, y, width, height.")
+    sw, sh = int(job.get("width") or 1920), int(job.get("height") or 1080)
+    x, y, bw, bh = (max(0, int(round(float(n)))) for n in v)
+    bw, bh = min(bw, sw - x), min(bh, sh - y)
+    if bw < 8 or bh < 8:
+        raise ValueError("Each area must be at least 8 pixels wide and tall.")
+    return [x, y, bw, bh]
+
+
+def apply_framing(job, changes: dict) -> None:
+    """Face and gameplay crops are job-wide: every clip shares them until the user changes them."""
+    touched = False
+    for key in ("facecam", "gameplay"):
+        if key not in changes:
+            continue
+        v = changes[key]
+        if v is None:
+            job.pop(key, None)
+            for c in job.get("clips", []):
+                c.pop(key, None)
+        else:
+            box = _norm_framing_box(job, v)
+            job[key] = box
+            for c in job.get("clips", []):
+                c[key] = box
+        touched = True
+    if touched:
+        if job.get("facecam") and job.get("gameplay"):
+            job["framing_ok"] = True
+        save(job)
+
+
+def apply_framing_layout(job, layout: str) -> None:
+    if layout not in render.LAYOUTS:
+        return
+    for c in job.get("clips", []):
+        c["layout"] = layout
+    save(job)
+
+
+def remake_all_clips(job, layout: str = "stack"):
+    """Re-render every finished clip with the job's shared face/gameplay boxes."""
+    fc, gm = job.get("facecam"), job.get("gameplay")
+    if not fc or not gm:
+        raise ValueError("Set both the facecam and gameplay areas first.")
+    lay = layout if layout in render.LAYOUTS else "stack"
+    n = 0
+    for c in job.get("clips", []):
+        if c.get("status") not in ("done", "error"):
+            continue
+        ch = {"layout": lay, "facecam": fc, "gameplay": gm}
+        clip = next(x for x in _jobs[job["id"]]["clips"] if x["id"] == c["id"])
+        clip.update({k: ch[k] for k in ch})
+        _q.put(("clip", job["id"], c["id"]))  # quick queue: must not wait behind whole videos
+        n += 1
+    save(job)
+    return n
+
+
+def resume_queued_clips(jid: str) -> int:
+    """Clips left as queued after the video finished — send them to the fast clip queue."""
+    job = _jobs.get(jid)
+    if not job:
+        raise ValueError("No such video.")
+    n = 0
+    for c in job.get("clips", []):
+        if c.get("status") == "queued":
+            _q.put(("clip", jid, c["id"]))
+            n += 1
+    return n
+
+
 def request_render(jid, cid, changes: dict):
     job = _jobs[jid]
     clip = next(c for c in job["clips"] if c["id"] == cid)
@@ -365,6 +495,19 @@ def request_render(jid, cid, changes: dict):
         new["style"] = DEFAULTS["style"]
     if new.get("layout") not in render.LAYOUTS:
         new["layout"] = DEFAULTS["layout"]
+    framing = {}
+    for key in ("facecam", "gameplay"):
+        if key not in changes:
+            continue
+        v = changes[key]
+        if v is None:
+            new.pop(key, None)
+            framing[key] = None
+        else:
+            new[key] = _norm_framing_box(job, v)
+            framing[key] = new[key]
+    if framing:
+        apply_framing(job, framing)
     clip.update(new, status="queued")
     save(job)
     _q.put(("clip", jid, cid))
@@ -375,6 +518,8 @@ def render_one(job, clip, words):
     clip["status"] = "rendering"
     save(job)
     try:
+        if not _fix_clip_span(clip, job):
+            raise ValueError("Start/end times for this clip are invalid.")
         if not clip.get("src") and not job.get("source_path"):
             _piece_again(job, clip)
         off = clip.get("src_offset", 0.0)
@@ -382,9 +527,14 @@ def render_one(job, clip, words):
         if not clip.get("src"):
             clip["end"] = min(clip["end"], job["duration"])
         local = dict(clip, start=clip["start"] - off, end=clip["end"] - off, hook=roman.to_roman(clip.get("hook") or ""))
+        if not local.get("facecam") and job.get("facecam"):
+            local["facecam"] = job["facecam"]
+        if not local.get("gameplay") and job.get("gameplay"):
+            local["gameplay"] = job["gameplay"]
         near = _caption_words(job, clip, words, off) if clip.get("captions", True) else []
         out = render.render_clip(src, d / "clips", clip["id"], local, near, job["width"], job["height"])
         clip.update(out, status="done", version=clip.get("version", 0) + 1, error=None)
+        write_framing_still(job, clip)
         post = {k: clip[k] for k in ("title", "description", "hashtags", "hook", "start", "end", "score")}
         (d / "clips" / f"{clip['id']}.json").write_text(json.dumps(post, indent=1), encoding="utf-8")
         if clip["version"] == 1:
@@ -468,6 +618,26 @@ LONG_VIDEO = 40 * 60   # above this, fetch only the pieces that become clips
 PAD = 8                # seconds kept either side of a fetched piece, so clips can be re-trimmed
 
 
+def _fix_clip_span(clip, job) -> bool:
+    """AI or offset matching can occasionally leave end <= start; repair before fetch/render."""
+    o = job.get("options") or DEFAULTS
+    mn, mx = int(o.get("min_len", 15)), int(o.get("max_len", 60))
+    dur = float(job.get("duration") or 0) or 1e9
+    s, e = float(clip.get("start", 0)), float(clip.get("end", 0))
+    if e > s + 2:
+        return True
+    if e <= s:
+        e = min(dur, s + mx)
+    if e - s < mn:
+        e = min(dur, s + mn)
+    if e <= s:
+        s = max(0.0, e - mx)
+        if e <= s:
+            e = min(dur, s + mx)
+    clip["start"], clip["end"] = round(s, 2), round(min(dur, e), 2)
+    return clip["end"] > clip["start"] + 2
+
+
 def _piece_again(job, clip):
     """Remaking a clip whose own piece of the video was never fetched (its first try failed) and whose whole video
     is not here: fetch the piece now, cut exactly at the asked time, so no sound matching is needed."""
@@ -493,6 +663,8 @@ def _fetch_piece(job, clip, full_audio):
     """Long videos: download just this clip's stretch and pin down exactly where it starts."""
     d = Path(job["dir"])
     o = job["options"]
+    if not _fix_clip_span(clip, job):
+        raise RuntimeError("This clip's start/end times are invalid.")
     try:
         want = max(0.0, clip["start"] - PAD)
         piece = media.download_section(job["source"]["url"], d / "clips", f"{clip['id']}.src", want,
@@ -504,7 +676,10 @@ def _fetch_piece(job, clip, full_audio):
         meta = media.probe(piece)
         off = media.find_offset(full_audio, part, want)
         clip.update(src=str(piece), src_offset=round(off, 2), src_end=round(off + meta["duration"], 2))
-        clip["start"], clip["end"] = max(clip["start"], clip["src_offset"]), min(clip["end"], clip["src_end"])
+        ns, ne = max(clip["start"], clip["src_offset"]), min(clip["end"], clip["src_end"])
+        if ne > ns + 2:
+            clip["start"], clip["end"] = ns, ne
+        _fix_clip_span(clip, job)
         job.setdefault("width", meta["width"])
         job.setdefault("height", meta["height"])
     except Exception as e:  # noqa: BLE001
@@ -523,14 +698,88 @@ def _covers(words: list, start: float, end: float) -> bool:
     return len(inside) >= 25 * minutes and inside[-1]["s"] >= start + 0.85 * (end - start)
 
 
-def _facecam(job) -> list | None:
+def framing_source(job, cid: str | None = None) -> Path | None:
+    """The widest source file to use for manual facecam framing (full VOD or a live clip piece)."""
+    d = Path(job["dir"]) / "clips"
+    if cid:
+        clip = next((c for c in job.get("clips", []) if c.get("id") == cid), None)
+        seen = set()
+        picks = []
+        if clip and clip.get("src"):
+            picks.append(Path(clip["src"]))
+        picks += [d / f"{cid}{suf}" for suf in (".src.ts", ".src", ".src.mp4", ".src.mkv")]
+        for p in picks:
+            key = str(p)
+            if key in seen:
+                continue
+            seen.add(key)
+            if p.is_file():
+                return p
+    for p in (Path(job["dir"]) / "source.mp4", Path(job.get("source_path") or "")):
+        if p.is_file():
+            return p
+    return None
+
+
+def ensure_framing_source(job, cid: str) -> Path:
+    """Make sure the horizontal source for a clip exists (re-download a piece for long YouTube jobs)."""
+    p = framing_source(job, cid)
+    if p:
+        return p
+    clip = next((c for c in job.get("clips", []) if c.get("id") == cid), None)
+    if not clip:
+        raise ValueError("No such clip.")
+    if clip.get("status") != "done":
+        raise ValueError("Wait until this clip has finished before editing framing.")
+    if (job.get("source") or {}).get("type") == "url":
+        _piece_again(job, clip)
+        save(job)
+    p = framing_source(job, cid)
+    if not p:
+        raise ValueError("No wide source for this clip. Try Save and re-make once, then open again.")
+    return p
+
+
+def write_framing_still(job, clip: dict):
+    """A still frame of the wide source, so the framing editor works even when video playback fails."""
+    try:
+        cid = clip.get("id")
+        if not cid:
+            return
+        src = framing_source(job, cid)
+        if not src:
+            return
+        out = Path(job["dir"]) / "clips" / f"{cid}.frame.jpg"
+        meta = media.probe(src)
+        job["width"], job["height"] = meta["width"], meta["height"]
+        media.run(["ffmpeg", "-y", "-v", "error", "-ss", "1", "-i", str(src), "-frames:v", "1",
+                   "-q:v", "4", str(out)], timeout=120)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def framing_preview(job, cid: str) -> Path:
+    """Browser-friendly MP4 for the framing editor (Chrome often won't play .ts pieces)."""
+    src = ensure_framing_source(job, cid)
+    if src.suffix.lower() == ".mp4":
+        return src
+    out = Path(job["dir"]) / "clips" / f"{cid}.framing.mp4"
+    if out.is_file() and out.stat().st_mtime >= src.stat().st_mtime:
+        return out
+    media.run(["ffmpeg", "-y", "-v", "error", "-i", str(src),
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+               "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)])
+    return out if out.is_file() else src
+
+
+def _facecam(job, src: str | Path | None = None) -> list | None:
     """Where the webcam is in the source: once for the whole video, for every clip of it.
 
     Only a sure answer is used. A box that is a scoreboard drawn over the game would
     put a picture of a scoreboard in the corner of the clip. One frame is also shown to
     the AI, which tells a person from a game character better than any measurement can;
     what it says is measured again on the picture, so it cannot do any harm."""
-    path = job.get("source_path")
+    path = src or job.get("source_path")
     if not path or not Path(path).is_file():
         return None
     try:
@@ -539,7 +788,8 @@ def _facecam(job) -> list | None:
         return None
     if not box or box.get("conf") != "high":
         return None
-    job["facecam"] = [box["x"], box["y"], box["w"], box["h"]]
+    fc = [box["x"], box["y"], box["w"], box["h"]]
+    apply_framing(job, {"facecam": fc})
     return job["facecam"]
 
 
@@ -565,6 +815,7 @@ def _run_job(job):
     notes = []
     face = False       # where the webcam is in the source, found once; False means not looked for yet
     usage.set_context(job["creator"], job["title"] or src.get("name"))
+    _check_cancel(job)
     resuming = bool(job.pop("resume", False)) and (d / "words.json").is_file()
     if resuming:   # after a restart: keep the transcript parts, clips and AI answers already made, and carry on
         _set(job, status="running", stage="Picking up where it stopped", error=None)
@@ -594,7 +845,11 @@ def _run_job(job):
         pieces = span > LONG_VIDEO or meta["duration"] <= 0
         if not pieces:  # shorter video: fetch all of it in the background while the audio is worked on
             video = fetch.submit(media.download, src["url"], d, int(o["quality"]))
-        audio_file = media.download_audio(src["url"], d, lambda p: _set(job, progress=0.03 + 0.1 * p))
+        def audio_prog(p):
+            _check_cancel(job)
+            _set_progress(job, 0.03 + 0.1 * p)
+
+        audio_file = media.download_audio(src["url"], d, audio_prog)
     else:
         pieces, audio_file = False, Path(src["path"])
         info = media.probe(audio_file)
@@ -704,7 +959,7 @@ def _run_job(job):
             def tp(p, i=i, a_=a_, b_=b_):
                 if now_on[0] == i and p - last[0] > 0.05:      # only the part being shown moves the bar
                     last[0] = p
-                    _set(job, progress=max(job["progress"], 0.14 + 0.78 * ((a_ - lo) + p * (b_ - a_)) / max(1, hi - lo)))
+                    _set_progress(job, max(job["progress"], 0.14 + 0.78 * ((a_ - lo) + p * (b_ - a_)) / max(1, hi - lo)))
             heard[i] = ahead.submit(ctx.bind(transcribe.transcribe), audio[a_:b_], tp)
 
     # The ad breaks and static screens of the whole video, found once. It reads the video end to end,
@@ -724,7 +979,7 @@ def _run_job(job):
             hear(bi)
             hear(bi + 1)
             bw = heard.pop(bi).result()
-        _set(job, progress=max(job["progress"], 0.14 + 0.78 * (b - lo) / max(1, hi - lo)))
+        _set_progress(job, max(job["progress"], 0.14 + 0.78 * (b - lo) / max(1, hi - lo)))
         words += [dict(w, s=round(w["s"] + shift, 2), e=round(w["e"] + shift, 2)) for w in bw]
         (d / "words.json").write_text(json.dumps(words), encoding="utf-8")
         _set(job, stage="Finding the best moments" + where, word_count=len(words))
@@ -759,10 +1014,19 @@ def _run_job(job):
                      captions=o.get("captions", True), status="queued", version=0)
             # Only the gameplay layout uses a webcam, so it is only looked for then, and only once: a
             # stream with no webcam is not looked for again on every clip of it.
-            if o["layout"] == "gameplay" and face is False:
+            if o["layout"] in ("gameplay", "stack") and face is False:
                 face = _facecam(job)
             if face:
                 c["facecam"] = face
+            if job.get("facecam"):
+                c["facecam"] = job["facecam"]
+            if job.get("gameplay"):
+                c["gameplay"] = job["gameplay"]
+            if job.get("facecam") and job.get("gameplay"):
+                c["layout"] = "stack"
+            if not _fix_clip_span(c, job):
+                notes.append(f"Skipped a moment around {c['start']:.0f}s: times were invalid.")
+                continue
             job["clips"].append(c)
             futures.append((renders.submit(ctx.bind(make), c, list(words)), c))
         job["ai"] = {"model": model, "tokens": tokens, "note": "", "log": notes[-5:]}
@@ -812,6 +1076,9 @@ def _worker(quick_only=False):
         token = ctx._uid.set(job["user"])  # everything this job does runs as its owner
         try:
             if kind == "job":
+                if job.get("_cancel"):
+                    _set(job, status="error", error="Cancelled by you.", stage="Cancelled", progress=0)
+                    continue
                 _run_job(job)
             else:
                 clip = next(c for c in job["clips"] if c["id"] == cid)
@@ -819,6 +1086,10 @@ def _worker(quick_only=False):
                 if clip.get("captions", True):
                     words = json.loads((Path(job["dir"]) / "words.json").read_text(encoding="utf-8"))
                 render_one(job, clip, words)
+        except JobCancelled:
+            if kind == "job":
+                _set(job, status="error", error="Cancelled by you.", stage="Cancelled", progress=0)
+                creators.log(job.get("creator"), "Video cancelled")
         except Exception as e:  # noqa: BLE001
             (Path(job["dir"]) / "error.log").write_text(traceback.format_exc(), encoding="utf-8")
             if kind == "job":
@@ -842,6 +1113,9 @@ def _pick_up_after_restart():
         for cid in j.pop("remake", []):
             _q.put(("clip", j["id"], cid))
         if j.get("status") == "done":
+            for c in j.get("clips", []):
+                if c.get("status") == "queued":
+                    _q.put(("clip", j["id"], c["id"]))
             save(j)
 
 

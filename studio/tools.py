@@ -76,8 +76,17 @@ def missing() -> list:
 def explain(e) -> str:
     """The plain-words version of "the program could not be found", or "" if the error is something else."""
     text = str(e)
+    low = text.lower()
     not_found = isinstance(e, FileNotFoundError) or "WinError 2" in text or "No such file or directory: 'ff" in text
-    return HELP if not_found and (missing() or "ffmpeg" in text or "ffprobe" in text or "WinError 2" in text) else ""
+    if not_found and (missing() or "ffmpeg" in text or "ffprobe" in text or "WinError 2" in text):
+        return HELP
+    if isinstance(e, PermissionError) or "winerror 5" in low or "access is denied" in low:
+        if "unable to download" in low or "job.json" in low or "[file]" in text:
+            return ("Windows blocked PeakCut from updating this video while it was downloading "
+                    "(another program or antivirus may have had the folder open). "
+                    "Restart PeakCut, delete any files ending in .part in that video's folder, then try again. "
+                    "Or upload the MP4 file instead of pasting a link.")
+    return ""
 
 
 setup()
