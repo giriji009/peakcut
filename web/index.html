@@ -2175,6 +2175,7 @@ async function drawSettings() {
             : `<div class="row" style="margin-top:16px"><button class="btn" data-act="storchange">Change folder</button></div>`}</section>`;
     }
     if (tab === "apps") {
+      const pset = await api("/api/settings");
       const conn = S.accounts || [];
       const app = (key, name, logo, bg, desc, action, list) => `<div class="appcard"><span class="applogo" style="background:${bg}">${logo}</span>
           <div class="apptx"><b>${name}</b><span>${desc}</span>${list}</div><div class="appact">${action}</div></div>`;
@@ -2220,7 +2221,14 @@ async function drawSettings() {
         return `<div class="appcard"><span class="applogo" style="background:${bg}">${logo}</span>
           <div class="apptx"><b>${name}</b><span>${desc}</span>${listOf(accs)}${igTok}</div><div class="appact">${act}</div>${panel}</div>`;
       };
-      body.innerHTML = `<section class="set-sec"><h2>Connected apps</h2><p class="help">Connect the accounts PeakCut posts clips to: press Connect, sign in on the platform's own page, and you're back here. PeakCut never sees your passwords. Then pick which accounts each creator posts to, in that creator's Setup.</p>
+      body.innerHTML = `<section class="set-sec"><h2>Every post</h2><p class="help">Same on every account: extra description, default tags, and whether AI clip tags are used.</p>
+        <div class="fields">
+          <label class="f span">Extra description<textarea data-s="post_footer" rows="3" placeholder="Credit line or promo blurb">${esc(pset.post_footer || "")}</textarea></label>
+          <label class="f span">Default tags<input data-s="post_tags" value="${esc(pset.post_tags || "")}" placeholder="GTA6, ViceCity, gaming"></label>
+          <label class="sw span"><input type="checkbox" data-s-cb="post_no_tags" ${pset.post_no_tags ? "checked" : ""}><span>Skip AI clip tags<small>Only your default tags and each clip's Tags field are used.</small></span></label>
+        </div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" data-act="ssave">Save</button></div></section>
+        <section class="set-sec"><h2>Connected apps</h2><p class="help">Connect the accounts PeakCut posts clips to: press Connect, sign in on the platform's own page, and you're back here. PeakCut never sees your passwords. Then pick which accounts each creator posts to, in that creator's Setup.</p>
         <div class="apps">
           ${card("youtube", "YouTube", yt, "#FF0000", "Post clips to your channel as Shorts.")}
           ${card("instagram", "Instagram", ig, "linear-gradient(45deg,#F58529,#DD2A7B,#8134AF)", "Post clips as Reels. Needs a Creator or Business account.")}
@@ -2229,7 +2237,12 @@ async function drawSettings() {
     }
   } catch (e) { body.innerHTML = `<div class="set-load">${esc(e.message)}</div>`; }
 }
-async function saveSettings() { const d = {}; $$("#sform [data-s]").forEach(i => d[i.dataset.s] = i.value); await send("/api/settings", d, "PUT"); }
+async function saveSettings() {
+  const d = {};
+  $$("#sform [data-s]").forEach(i => { d[i.dataset.s] = i.value; });
+  $$("#sform [data-s-cb]").forEach(i => { d[i.dataset.sCb] = i.checked; });
+  await send("/api/settings", d, "PUT");
+}
 
 /* ============================================================ clip editor */
 const FRAMING_LAYOUTS = [
@@ -2503,7 +2516,10 @@ function drawClipDlg(full) {
         <h3>Post text</h3>
         <label class="f">Title<input data-f="title" value="${esc(c.title)}"></label>
         <label class="f">Description<textarea data-f="description" rows="2">${esc(c.description)}</textarea></label>
-        <button class="btn" data-act="remake">${ic("scissors")}Save and re-make clip</button>
+        <label class="f">Tags<span class="hint">YouTube tags and hashtags. Comma-separated — e.g. GTA6, ViceCity, gaming</span>
+          <input data-f="tags" value="${esc((c.hashtags || []).join(", "))}" placeholder="GTA6, gaming"></label>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" data-act="savepost">${ic("check")}Save post text</button>
+          <button class="btn" data-act="remake">${ic("scissors")}Save and re-make clip</button></div>
         <h3>Post it</h3>
         <div id="dposts" class="row" style="gap:4px"></div>
         ${S.accounts.length ? `<div class="row">${S.accounts.map(a => `<label class="ck"><input type="checkbox" data-pacc value="${esc(a.id)}">${esc(a.label)} · ${esc(a.name)}</label>`).join("")}</div>
@@ -2904,6 +2920,16 @@ document.addEventListener("click", async e => {
         toast(a === "draggm" ? "Now drag on the wide picture for gameplay (cyan box)" : "Now drag on the wide picture for facecam (pink box)", "ok");
       }
       return;
+    }
+    if (a === "savepost") {
+      const body = {};
+      ["title", "description", "tags"].forEach(k => {
+        const el = $(`#clipdlg [data-f=${k}]`);
+        if (el) body[k] = el.value;
+      });
+      await send(`/api/jobs/${D.jid}/clips/${D.cid}`, body, "PATCH");
+      toast("Post text saved", "ok");
+      return tick();
     }
     if (a === "remake") {
       const body = {}; $$("#clipdlg [data-f]").forEach(i => {

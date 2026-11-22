@@ -199,23 +199,50 @@ def on_clip_ready(job, clip):
         creators.log(c["id"], f"Queued for {len(made)} account(s): {clip.get('title') or clip.get('hook')}")
 
 
+def _parse_tag_list(raw) -> list:
+    import re
+    if isinstance(raw, list):
+        parts = raw
+    else:
+        parts = re.split(r"[,;#\n]+", str(raw or ""))
+    out, seen = [], set()
+    for p in parts:
+        t = re.sub(r"\W", "", str(p).strip())[:30]
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out[:15]
+
+
+def _all_tags(clip, creator) -> list:
+    """Clip tags plus Settings → Default tags. post_no_tags skips AI clip tags only."""
+    s = accounts.settings()
+    custom = _parse_tag_list(s.get("post_tags") or "")
+    if s.get("post_no_tags"):
+        return custom[:15]
+    out, seen = [], set()
+    for t in [h for h in clip.get("hashtags", []) if h] + custom:
+        k = str(t).lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(t)
+    return out[:15]
+
+
 def _caption(clip, creator):
     s = accounts.settings()
     parts = [clip.get("description", "")]
-    if not s.get("post_no_tags"):
-        tagline = " ".join("#" + h for h in clip.get("hashtags", []) if h)
-        if tagline:
-            parts.append(tagline)
+    tags = _all_tags(clip, creator)
+    if tags:
+        parts.append(" ".join("#" + h for h in tags))
     footer = (s.get("post_footer") or creator.get("post_footer") or "").strip()
     if footer:
         parts.append(footer)
     return "\n\n".join(x for x in parts if x)
 
 
-def _yt_tags(clip) -> list:
-    if accounts.settings().get("post_no_tags"):
-        return []
-    return [h for h in clip.get("hashtags", []) if h][:15]
+def _yt_tags(clip, creator) -> list:
+    return _all_tags(clip, creator)
 
 
 def _yt_upload_cap_day() -> float:
@@ -354,7 +381,7 @@ def _post(p):
         creator = creators.get(job["creator"]) or dict(creators.DEFAULTS, name="clips")
         title, cap = clip.get("title") or clip.get("hook") or "Clip", _caption(clip, creator)
         if acc["platform"] == "youtube":
-            rid, url = accounts.youtube_upload(acc, path, title, cap + "\n\n#Shorts", _yt_tags(clip), creator["privacy"])
+            rid, url = accounts.youtube_upload(acc, path, title, cap + "\n\n#Shorts", _yt_tags(clip, creator), creator["privacy"])
         elif acc["platform"] == "instagram":
             rid, url = accounts.instagram_upload(acc, path, f"{title}\n\n{cap}", job["id"])
         elif acc["platform"] == "tiktok":

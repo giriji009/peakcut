@@ -1030,6 +1030,15 @@ def clip_framing_still(jid: str, cid: str):
     return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
 
 
+@app.patch("/api/jobs/{jid}/clips/{cid}")
+def patch_clip_meta(jid: str, cid: str, body: dict = Body(...)):
+    _job_or_404(jid)
+    try:
+        return jobs.patch_clip(jid, cid, body)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/jobs/{jid}/clips/{cid}/render")
 def rerender(jid: str, cid: str, body: dict = Body(...)):
     job = _job_or_404(jid)

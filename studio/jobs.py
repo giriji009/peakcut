@@ -472,6 +472,49 @@ def resume_queued_clips(jid: str) -> int:
     return n
 
 
+def parse_tags(raw) -> list:
+    import re
+    if isinstance(raw, list):
+        parts = raw
+    else:
+        parts = re.split(r"[,;#\n]+", str(raw or ""))
+    out, seen = [], set()
+    for p in parts:
+        t = re.sub(r"\W", "", str(p).strip())[:30]
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out[:15]
+
+
+def patch_clip(jid: str, cid: str, changes: dict) -> dict:
+    """Save title, description and tags without re-rendering the video."""
+    job = _jobs.get(jid)
+    if not job or job["user"] != ctx.uid():
+        raise ValueError("No such video.")
+    clip = next((c for c in job["clips"] if c["id"] == cid), None)
+    if not clip:
+        raise ValueError("No such clip.")
+    if "title" in changes:
+        clip["title"] = str(changes["title"])[:100]
+    if "description" in changes:
+        clip["description"] = str(changes["description"])[:2000]
+    if "tags" in changes:
+        clip["hashtags"] = parse_tags(changes["tags"])
+    save(job)
+    cj = Path(job["dir"]) / "clips" / f"{cid}.json"
+    if cj.is_file():
+        try:
+            meta = json.loads(cj.read_text(encoding="utf-8"))
+            for k in ("title", "description", "hashtags"):
+                if k in clip:
+                    meta[k] = clip[k]
+            cj.write_text(json.dumps(meta, indent=1), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+    return public(job)
+
+
 def request_render(jid, cid, changes: dict):
     job = _jobs[jid]
     clip = next(c for c in job["clips"] if c["id"] == cid)
@@ -491,6 +534,8 @@ def request_render(jid, cid, changes: dict):
     for k in ("hook", "title", "description", "style", "layout"):
         if k in changes:
             new[k] = str(changes[k])[:{"hook": 60, "title": 100, "description": 2000}.get(k, 20)]
+    if "tags" in changes:
+        new["hashtags"] = parse_tags(changes["tags"])
     if new.get("style") not in render.STYLES:
         new["style"] = DEFAULTS["style"]
     if new.get("layout") not in render.LAYOUTS:
