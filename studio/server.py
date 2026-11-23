@@ -1451,8 +1451,10 @@ def get_settings():
 def put_settings(body: dict = Body(...)):
     try:
         was_fast = bool(accounts.settings().get("post_fast"))
+        was_inst = bool(accounts.settings().get("post_instant"))
         accounts.save_settings(body)
-        if body.get("post_fast") and not was_fast:
+        pack = body.get("post_fast") and not was_fast or body.get("post_instant") and not was_inst
+        if pack:
             try:
                 posting.accelerate_queue()
             except ValueError as e:
@@ -1527,9 +1529,7 @@ def connect_callback(platform: str, code: str = "", state: str = "", error: str 
     return _back(connected=platform, name=acc["name"])
 
 
-@app.get("/pub/{token}.mp4")
-def public_clip(token: str):
-    """A clip for a platform to fetch while posting it: one clip, one hour, signed (see accounts.clip_link)."""
+def _pub_clip_path(token: str) -> Path:
     got = accounts.read_clip_link(token)
     if not got:
         raise HTTPException(404)
@@ -1539,7 +1539,32 @@ def public_clip(token: str):
         f = Path(job["dir"]) / "clips" / name if job else None
     if not f or not f.is_file():
         raise HTTPException(404)
-    return FileResponse(f, media_type="video/mp4", headers={"Cache-Control": "private, no-store"})
+    return f
+
+
+def _pub_clip_headers(f: Path) -> dict:
+    return {
+        "Accept-Ranges": "bytes",
+        "Content-Type": "video/mp4",
+        "Content-Length": str(f.stat().st_size),
+        "Cache-Control": "private, no-store",
+    }
+
+
+@app.head("/pub/{token}.mp4")
+def public_clip_head(token: str):
+    """Meta often probes with HEAD before downloading the Reel."""
+    f = _pub_clip_path(token)
+    return Response(status_code=200, headers=_pub_clip_headers(f))
+
+
+@app.get("/pub/{token}.mp4")
+def public_clip_get(token: str):
+    """A clip for a platform to fetch while posting it: one clip, one hour, signed (see accounts.clip_link)."""
+    f = _pub_clip_path(token)
+    h = _pub_clip_headers(f)
+    h.pop("Content-Length", None)  # FileResponse sets length (or 206 partial)
+    return FileResponse(f, media_type="video/mp4", headers=h)
 
 
 # ---------------------------------------------------------------- where PeakCut keeps everything (Settings, Storage)
@@ -1613,7 +1638,9 @@ def add_posts(body: dict = Body(...)):
     clip = next((c for c in job["clips"] if c["id"] == body.get("clip")), None) if job else None
     if not clip or clip.get("status") != "done":
         raise HTTPException(404, "That clip is not ready")
-    made = posting.enqueue(job, clip, [str(a) for a in body.get("accounts", [])][:20], now=bool(body.get("now")))
+    gap = body.get("gap_min")
+    made = posting.enqueue(job, clip, [str(a) for a in body.get("accounts", [])][:20], now=bool(body.get("now")),
+                          gap_min=gap if gap is not None else None)
     if not made:
         raise HTTPException(400, "Nothing was queued. Pick at least one account this clip has not already gone to.")
     return {"queued": len(made)}
@@ -1644,7 +1671,9 @@ def bulk_posts(body: dict = Body(...)):
     if len(pairs) > 150:
         raise HTTPException(400, "At most 150 clips at once.")
     try:
-        return posting.bulk_enqueue(pairs, body.get("accounts") or [], now=bool(body.get("now")))
+        gap = body.get("gap_min")
+        return posting.bulk_enqueue(pairs, body.get("accounts") or [], now=bool(body.get("now")),
+                                    gap_min=gap if gap is not None else None)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -1652,7 +1681,7 @@ def bulk_posts(body: dict = Body(...)):
 @app.post("/api/posts/{pid}/{action}")
 def post_action(pid: str, action: str):
     try:
-        {"cancel": posting.cancel, "retry": posting.retry}[action](pid)
+        {"cancel": posting.cancel, "retry": posting.retry, "rush": posting.rush}[action](pid)
     except KeyError:
         raise HTTPException(404)
     except ValueError as e:

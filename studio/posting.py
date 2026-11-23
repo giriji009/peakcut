@@ -49,10 +49,16 @@ def _fast_on() -> bool:
         return False
 
 
+def _instant_on() -> bool:
+    try:
+        s = accounts.settings()
+        return bool(s.get("post_instant")) or bool(s.get("post_fast"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _gap_minutes(platform: str) -> int:
-    if _fast_on():
-        return FAST_GAP.get(platform, 3)
-    return 45
+    return _worker_gap_minutes(platform)
 
 
 def _save():
@@ -94,6 +100,36 @@ def _mirror(p):
             jobs.save(job)
 
 
+def _clamp_gap(gap) -> int:
+    try:
+        return max(1, min(1440, int(gap)))
+    except (TypeError, ValueError):
+        return 3
+
+
+def _gap_for_schedule(creator: dict, gap_override=None) -> int:
+    """Minutes between posts on one account when building the queue."""
+    if gap_override is not None:
+        return _clamp_gap(gap_override)
+    s = accounts.settings()
+    if s.get("post_gap_min") is not None:
+        return _clamp_gap(s.get("post_gap_min", 3))
+    return _clamp_gap(creator.get("post_gap_min", 45))
+
+
+def _worker_gap_minutes(platform: str) -> int:
+    """Spacing while the worker moves through the queue (pack / fast worker)."""
+    try:
+        g = accounts.settings().get("post_gap_min")
+        if g is not None:
+            return _clamp_gap(g)
+    except Exception:  # noqa: BLE001
+        pass
+    if _fast_on():
+        return FAST_GAP.get(platform, 3)
+    return 45
+
+
 def _next_slot(account_id, gap_min, cap):
     """Earliest time that respects the gap between posts and the daily cap for this account."""
     mine = [p for p in _mine() if p["account"] == account_id and p["status"] in OPEN + ("posted",)]
@@ -106,8 +142,9 @@ def _next_slot(account_id, gap_min, cap):
     return t
 
 
-def enqueue(job, clip, account_ids, now=False) -> list:
+def enqueue(job, clip, account_ids, now=False, gap_min=None, stagger: dict | None = None) -> list:
     c = creators.get(job["creator"]) or creators.DEFAULTS
+    gap = _gap_for_schedule(c, gap_min)
     made = []
     with _lock:
         for aid in account_ids:
@@ -117,12 +154,12 @@ def enqueue(job, clip, account_ids, now=False) -> list:
             if any(p["job"] == job["id"] and p["clip"] == clip["id"] and p["account"] == aid
                    and p["status"] in OPEN + ("posted",) for p in _mine()):
                 continue  # never post the same clip to the same account twice
-            if now and acc["platform"] != "instagram":
+            if now and stagger is not None:
+                due = max(time.time(), stagger.get(aid, time.time()))
+                stagger[aid] = due + gap * 60
+            elif now:
                 due = time.time()
             else:
-                gap = c["post_gap_min"]
-                if acc["platform"] == "instagram":
-                    gap = max(15, gap)  # Meta rejects back-to-back Reels even when you press Post now
                 due = _next_slot(aid, gap, c["daily_cap"])
             p = {"id": secrets.token_hex(8), "user": ctx.uid(), "job": job["id"], "clip": clip["id"], "creator": job["creator"],
                  "account": aid, "account_name": acc["name"], "platform": acc["platform"], "status": "scheduled",
@@ -136,15 +173,16 @@ def enqueue(job, clip, account_ids, now=False) -> list:
     return made
 
 
-def bulk_enqueue(pairs: list, account_ids: list, now: bool = False) -> dict:
-    """Queue many clips to the same accounts. Default spacing keeps Instagram under rate limits."""
+def bulk_enqueue(pairs: list, account_ids: list, now: bool = False, gap_min=None) -> dict:
+    """Queue many clips to the same accounts. gap_min = minutes between posts on each account (1–1440)."""
     if accounts.settings()["paused"]:
         raise ValueError("Posting is paused. Resume on Home, then try again.")
     account_ids = [str(a) for a in account_ids if a][:20]
     if not account_ids:
         raise ValueError("Pick at least one account.")
     posts_made, clips_ok, skipped = 0, 0, 0
-    first_immediate = not now  # when now=True, only the first clip that actually queues goes out ASAP
+    pack = now or gap_min is not None
+    stagger = {} if pack else None
     for jid, cid in pairs:
         job = jobs.get(jid)
         if not job:
@@ -154,10 +192,7 @@ def bulk_enqueue(pairs: list, account_ids: list, now: bool = False) -> dict:
         if not clip or clip.get("status") != "done":
             skipped += 1
             continue
-        use_now = now and not first_immediate
-        made = enqueue(job, clip, account_ids, now=use_now)
-        if use_now and made:
-            first_immediate = True
+        made = enqueue(job, clip, account_ids, now=pack, gap_min=gap_min, stagger=stagger)
         if made:
             posts_made += len(made)
             clips_ok += 1
@@ -503,6 +538,17 @@ def cancel(pid):
     _mirror(p)
 
 
+def rush(pid):
+    """Move a scheduled post to the front of the queue (upload as soon as the worker is free)."""
+    with _lock:
+        p = next((p for p in _mine() if p["id"] == pid), None)
+        if not p or p["status"] != "scheduled":
+            raise ValueError("Only waiting posts can go out now.")
+        p["due_at"] = time.time()
+        _save()
+    _mirror(p)
+
+
 def _drop_stale_queue_dupes():
     """If a clip already posted to an account, cancel any failed/scheduled rows for the same triple."""
     by = {}
@@ -610,7 +656,8 @@ def overview() -> dict:
             views[_day(p["posted_at"])] += p["views"] or 0
     daily = [{"day": d, "clips": made[d], "posted": posted[d], "views": views[d]} for d in days]
     s = accounts.settings()
-    return {"paused": s["paused"], "post_fast": bool(s.get("post_fast")), "queue_progress": qprog,
+    return {"paused": s["paused"], "post_fast": bool(s.get("post_fast")), "post_instant": bool(s.get("post_instant")),
+            "post_gap_min": int(s.get("post_gap_min") or 3), "queue_progress": qprog,
             "creators": rows, "posts": show, "daily": daily,
             "alerts": alerts.configured(), "recording": len(live.active_mine())}
 

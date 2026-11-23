@@ -1831,6 +1831,26 @@ function zipDownload(ids) {
 function bulkClipKeys(ids) {
   return ids.map(k => { const p = k.split("."); return p.length === 2 ? [p[0], p[1]] : null; }).filter(Boolean);
 }
+const POST_GAP_OPTS = [[1, "1 min"], [2, "2 min"], [3, "3 min"], [5, "5 min"], [10, "10 min"], [15, "15 min"],
+  [30, "30 min"], [45, "45 min"], [60, "60 min"], [120, "2 hours"]];
+function gapPickHtml(id, val) {
+  const v = Number(val) || 3, custom = !POST_GAP_OPTS.some(x => x[0] === v);
+  return `<label class="f">Minutes between posts on each account
+    <select id="${id}">${POST_GAP_OPTS.map(([n, l]) => `<option value="${n}" ${n === v && !custom ? "selected" : ""}>${l}</option>`).join("")}
+      <option value="0" ${custom ? "selected" : ""}>Custom…</option></select>
+    <input id="${id}Num" type="number" min="1" max="1440" value="${custom ? v : 30}" style="margin-top:8px;${custom ? "" : "display:none"}">
+    <span class="hint">Each next clip on the same account waits this long (YouTube & Instagram).</span></label>`;
+}
+function wireGapPick(id) {
+  const sel = $(`#${id}`), num = $(`#${id}Num`);
+  sel?.addEventListener("change", () => { if (num) num.style.display = sel.value === "0" ? "" : "none"; });
+}
+function readGapPick(id) {
+  const sel = $(`#${id}`);
+  if (!sel) return 3;
+  if (sel.value === "0") return Math.max(1, Math.min(1440, Number($(`#${id}Num`)?.value || 3)));
+  return Math.max(1, Number(sel.value) || 3);
+}
 function openBulkPostDialog(clipIds, title) {
   const A = S.accounts;
   if (!A.length) return toast("Connect YouTube or Instagram in Settings first.", "bad");
@@ -1843,19 +1863,24 @@ function openBulkPostDialog(clipIds, title) {
     `<div style="margin:8px 0 4px"><b>${p}</b></div>${byPlat[p].map(a =>
       `<label class="ck" style="display:block;margin:4px 0"><input type="checkbox" name="bulkacc" value="${esc(a.id)}" checked> ${esc(a.name)} <span class="sub">(${esc(a.detail || a.label)})</span></label>`).join("")}`
   ).join("");
+  const defGap = S.overview?.post_gap_min || 3;
   dlg.innerHTML = `<form method="dialog" class="dlg"><h2>${esc(title || "Post clips")}</h2>
-    <p class="help"><b>${n}</b> clip${n === 1 ? "" : "s"} → pick accounts below. Posts are <b>spread out</b> automatically (your creator gap on Instagram) so rate limits are less likely.</p>
+    <p class="help"><b>${n}</b> clip${n === 1 ? "" : "s"} → pick accounts below.</p>
     <div style="max-height:40vh;overflow:auto;margin:12px 0">${accs}</div>
-    <label class="sw"><input type="checkbox" id="bulkNow"> Post the first one immediately (rest stay queued with spacing)</label>
+    ${gapPickHtml("bulkGap", defGap)}
+    <label class="sw"><input type="checkbox" id="bulkNow" checked> Start uploading from now (first clip as soon as the worker is free)</label>
     <motion class="dlg-foot"><button type="button" class="btn" value="no">Cancel</button>
-      <button type="submit" class="btn primary" value="yes">${ic("send")} Queue all safely</button></motion></form>`;
+      <button type="submit" class="btn primary" value="yes">${ic("send")}Post</button></motion></form>`;
+  wireGapPick("bulkGap");
   dlg.onclose = async () => {
     if (dlg.returnValue !== "yes") return;
     const accounts = $$("input[name=bulkacc]:checked").map(i => i.value);
     if (!accounts.length) return toast("Tick at least one account.", "bad");
-    if (!await ask("Post these clips?", `${n} clip${n === 1 ? "" : "s"} will go to ${accounts.length} account(s), spaced apart. Clips already on an account are skipped.`, "Queue posts")) return;
+    const gapMin = readGapPick("bulkGap"), instant = !!$("#bulkNow")?.checked;
+    const when = instant ? "starting now" : "scheduled";
+    if (!await ask("Queue these posts?", `${n} clip(s) → ${accounts.length} account(s), ${gapMin} min apart, ${when}.`, "Queue")) return;
     try {
-      const r = await send("/api/posts/bulk", {clips: clipIds, accounts, now: !!$("#bulkNow")?.checked});
+      const r = await send("/api/posts/bulk", {clips: clipIds, accounts, now: instant, gap_min: gapMin});
       toast(`Queued ${r.queued} post${r.queued === 1 ? "" : "s"} for ${r.clips} clip${r.clips === 1 ? "" : "s"}` + (r.skipped ? ` (${r.skipped} skipped)` : ""), "ok");
       return tick();
     } catch (e) { toast(e.message, "bad"); }
@@ -2041,14 +2066,16 @@ function drawOverview() {
       ${o.creators.length ? `<div class="scroll"><table><tr><th>Creator</th><th>Status</th><th>Auto-post</th><th class="num">Clips today</th><th class="num">Posted today</th><th class="num">Waiting</th><th class="num">Failed</th><th class="num">Views</th><th class="num">Est. $</th></tr>
       ${o.creators.map(r => `<tr><td><a class="lnk" href="#" data-act="go" data-v="c:${esc(r.id)}">${esc(r.name)}</a></td><td>${state(r)}</td><td>${r.autopost ? `<span class="pill ok">On</span>` : `<span class="pill">Off</span>`}</td><td class="num">${r.clips_today} <span class="sub">/ ${r.clips_total}</span></td><td class="num">${r.posted_today} <span class="sub">/ ${r.posted_total}</span></td><td class="num">${r.queued}</td><td class="num">${r.failed}</td><td class="num">${r.views.toLocaleString()}</td><td class="num">${r.earnings.toFixed(2)}</td></tr>`).join("")}</table></div>`
       : `<div class="empty"><img src="/brand/favicon.svg" alt=""><b>No creators yet</b>Add one to give each streamer their own workspace.</div>`}</div>
-    <div class="card"><div class="card-head"><div><h2>Post queue</h2><p class="sub">${o.paused ? "Paused. Recording and clipping carry on; nothing is posted." : o.post_fast ? "Fast mode: uploads go one by one (~3 min YouTube, ~15 min Instagram), with auto-retry." : "Queued clips go out at their scheduled time."}</p></div>
+    <div class="card"><div class="card-head"><div><h2>Post queue</h2><p class="sub">${o.paused ? "Paused. Recording and clipping carry on; nothing is posted." : `Spacing: <b>${o.post_gap_min || 3} min</b> between posts on each account. ${o.post_instant || o.post_fast ? "Uploads run back-to-back when due." : "Turn on Instant posting in Settings to avoid long creator gaps."}`}</p></div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
-        <button class="btn ${o.post_fast ? "primary" : ""}" data-act="postfast">${o.post_fast ? ic("play") + "Fast on" : ic("clock") + "Fast queue"}</button>
+        <button class="btn ${o.post_instant ? "primary" : ""}" data-act="postinstant">${o.post_instant ? ic("send") + "Instant on" : ic("clock") + "Instant posting"}</button>
+        <button class="btn" data-act="queuego">${ic("play")}Run queue now</button>
+        <button class="btn ${o.post_fast ? "primary" : ""}" data-act="postfast" title="Faster worker between uploads">${o.post_fast ? "Fast worker on" : "Fast worker"}</button>
         <button class="btn ${o.paused ? "primary" : ""}" data-act="pause">${ic(o.paused ? "play" : "pause")}${o.paused ? "Resume posting" : "Pause all posting"}</button></div></div>
       ${live}${nxt}
       ${o.posts.length ? `<div class="scroll"><table class="stack queue-table"><tr><th>When</th><th>Clip</th><th>Creator</th><th>Account</th><th class="num">Views</th><th></th></tr>
       ${o.posts.map(p => `<tr class="${p.status === "posting" ? "row-live" : p.is_next ? "row-next" : ""}"><td data-l="Status">${pst(p)}</td><td data-l="Clip" class="c-main">${p.url ? `<a class="lnk" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>` : esc(p.title)}${p.error ? `<div class="err" style="margin:2px 0 0">${esc(p.error)}</div>` : ""}</td><td data-l="Creator">${esc(p.creator_name || "None")}</td><td data-l="Account">${esc(p.account_name)}</td><td data-l="Views" class="num">${p.views ?? "–"}</td>
-        <td class="c-act" style="text-align:right">${p.status === "scheduled" ? `<button class="btn sm" data-act="pcancel" data-id="${p.id}">Cancel</button>` : p.status === "failed" ? `<button class="btn sm" data-act="pretry" data-id="${p.id}">Retry</button>` : ""}</td></tr>`).join("")}</table></div>`
+        <td class="c-act" style="text-align:right">${p.status === "scheduled" ? `<button class="btn sm primary" data-act="prush" data-id="${p.id}">Post now</button><button class="btn sm" data-act="pcancel" data-id="${p.id}">Cancel</button>` : p.status === "failed" ? `<button class="btn sm primary" data-act="pretry" data-id="${p.id}">Retry</button>` : ""}</td></tr>`).join("")}</table></div>`
       : `<p class="help">Nothing queued or posted yet.</p>`}</div>`);
 }
 
@@ -2226,6 +2253,12 @@ async function drawSettings() {
           <label class="f span">Extra description<textarea data-s="post_footer" rows="3" placeholder="Credit line or promo blurb">${esc(pset.post_footer || "")}</textarea></label>
           <label class="f span">Default tags<input data-s="post_tags" value="${esc(pset.post_tags || "")}" placeholder="GTA6, ViceCity, gaming"></label>
           <label class="sw span"><input type="checkbox" data-s-cb="post_no_tags" ${pset.post_no_tags ? "checked" : ""}><span>Skip AI clip tags<small>Only your default tags and each clip's Tags field are used.</small></span></label>
+          <label class="f span">Default minutes between posts<select data-s="post_gap_min">${POST_GAP_OPTS.map(([n, l]) =>
+            `<option value="${n}" ${Number(pset.post_gap_min) === n ? "selected" : ""}>${l}</option>`).join("")}
+            ${!POST_GAP_OPTS.some(x => x[0] === Number(pset.post_gap_min)) ? `<option value="${Number(pset.post_gap_min) || 3}" selected>Custom (${Number(pset.post_gap_min) || 3})</option>` : ""}</select>
+            <span class="hint">Used for queue, bulk post, and “Run queue now”. Pick 1–2 for fast blasts; 15–30 is safer on Instagram.</span></label>
+          <label class="sw span"><input type="checkbox" data-s-cb="post_instant" ${pset.post_instant ? "checked" : ""}><span>Instant posting<small>New items use your gap above from now (not the creator’s 45 min).</small></span></label>
+          <label class="sw span"><input type="checkbox" data-s-cb="post_fast" ${pset.post_fast ? "checked" : ""}><span>Fast queue worker<small>Uploads one after another when due.</small></span></label>
         </div>
         <div class="row" style="margin-top:12px"><button class="btn primary" data-act="ssave">Save</button></div></section>
         <section class="set-sec"><h2>Connected apps</h2><p class="help">Connect the accounts PeakCut posts clips to: press Connect, sign in on the platform's own page, and you're back here. PeakCut never sees your passwords. Then pick which accounts each creator posts to, in that creator's Setup.</p>
@@ -2239,7 +2272,9 @@ async function drawSettings() {
 }
 async function saveSettings() {
   const d = {};
-  $$("#sform [data-s]").forEach(i => { d[i.dataset.s] = i.value; });
+  $$("#sform [data-s]").forEach(i => {
+    d[i.dataset.s] = i.dataset.s === "post_gap_min" ? Number(i.value) : i.value;
+  });
   $$("#sform [data-s-cb]").forEach(i => { d[i.dataset.sCb] = i.checked; });
   await send("/api/settings", d, "PUT");
 }
@@ -2523,7 +2558,7 @@ function drawClipDlg(full) {
         <h3>Post it</h3>
         <div id="dposts" class="row" style="gap:4px"></div>
         ${S.accounts.length ? `<div class="row">${S.accounts.map(a => `<label class="ck"><input type="checkbox" data-pacc value="${esc(a.id)}">${esc(a.label)} · ${esc(a.name)}</label>`).join("")}</div>
-          <div class="row"><button class="btn primary" data-act="postnow">${ic("send")}Post now</button><button class="btn" data-act="postqueue">Add to queue</button></div>`
+          <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="postnow">${ic("send")}Post instantly</button><button class="btn" data-act="postqueue">Add to queue (spaced)</button></div>`
           : `<p class="help">No accounts connected yet. Connect one in Settings.</p>`}
         <div class="row" style="margin-top:auto;padding-top:8px;border-top:1px solid var(--line)">
           ${c.status === "done" ? `<a class="btn" href="${m}${esc(c.file)}?download=1">${ic("down")}Download</a>` : ""}
@@ -2859,7 +2894,22 @@ document.addEventListener("click", async e => {
       if (on) try { await send("/api/posts/accelerate", {}); toast("Queue packed — uploading one by one", "ok"); } catch (e) { toast(e.message, "bad"); }
       return loadOverview();
     }
-    if (a === "pcancel" || a === "pretry") { await api(`/api/posts/${d.id}/${a === "pcancel" ? "cancel" : "retry"}`, {method:"POST"}); return loadOverview(); }
+    if (a === "pcancel" || a === "pretry" || a === "prush") {
+      await api(`/api/posts/${d.id}/${a === "pcancel" ? "cancel" : a === "prush" ? "rush" : "retry"}`, {method:"POST"});
+      if (a === "prush") toast("Moved to front — uploading soon", "ok");
+      return loadOverview();
+    }
+    if (a === "queuego") {
+      try { const r = await send("/api/posts/accelerate", {}); toast(`Queue packed — ${r.rescheduled || 0} moved up`, "ok"); } catch (e) { toast(e.message, "bad"); }
+      return loadOverview();
+    }
+    if (a === "postinstant") {
+      const on = !S.overview?.post_instant;
+      await send("/api/settings", {post_instant: on, post_fast: on || S.overview?.post_fast}, "PUT");
+      if (on) try { await send("/api/posts/accelerate", {}); } catch (e) { toast(e.message, "bad"); }
+      toast(on ? "Instant posting on" : "Instant posting off", "ok");
+      return loadOverview();
+    }
     if (a === "ssave") { await saveSettings(); toast("Saved", "ok"); return drawSettings(); }
     if (a === "plansave") {
       const p = {}; $$("#sform [data-plan]").forEach(i => { (p[i.dataset.plan] ??= {})[i.dataset.f] = Number(i.value); });

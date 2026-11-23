@@ -24,8 +24,8 @@ _states: dict = {}   # one-time values for the connect redirects: state -> (user
 
 SECRET_KEYS = ("discord_webhook", "telegram_token")
 SETTING_DEFAULTS = {"discord_webhook": "", "telegram_token": "", "telegram_chat": "", "paused": False,
-                    "post_fast": False, "post_no_tags": False, "post_footer": "", "post_tags": "",
-                    "digest_hour": 8, "last_digest": "", "tour_done": False}
+                    "post_fast": False, "post_instant": False, "post_gap_min": 3, "post_no_tags": False,
+                    "post_footer": "", "post_tags": "", "digest_hour": 8, "last_digest": "", "tour_done": False}
 
 YT_SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
 IG = "https://graph.instagram.com"
@@ -251,10 +251,12 @@ def save_settings(patch: dict) -> dict:
         for k, v in patch.items():
             if k not in SETTING_DEFAULTS:
                 continue
-            if k in ("paused", "tour_done", "post_fast", "post_no_tags"):
+            if k in ("paused", "tour_done", "post_fast", "post_instant", "post_no_tags"):
                 v = bool(v)
             elif k == "digest_hour":
                 v = max(0, min(23, int(v)))
+            elif k == "post_gap_min":
+                v = max(1, min(1440, int(v)))
             elif k in ("post_footer", "post_tags"):
                 v = str(v).strip()[:4000]
             else:
@@ -468,7 +470,13 @@ def instagram_upload(acc, path: Path, caption: str, job_id: str = ""):
         if st.get("status_code") in ("FINISHED", "PUBLISHED"):
             break
         if st.get("status_code") in ("ERROR", "EXPIRED"):
-            raise RuntimeError(f"Instagram rejected the video: {st.get('status', st['status_code'])}")
+            detail = (st.get("status") or st["status_code"]).strip()
+            if detail.upper() in ("ERROR", "EXPIRED", ""):
+                detail = (
+                    "Meta could not download the video from your public link (tunnel too slow, down, or wrong "
+                    "PEAKCUT_PUBLIC_URL). Keep cloudflared running, match .env to the tunnel URL, restart PeakCut, retry."
+                )
+            raise RuntimeError(f"Instagram rejected the video: {detail}")
         time.sleep(6)
     else:
         raise RuntimeError("Instagram took too long to process the video.")
